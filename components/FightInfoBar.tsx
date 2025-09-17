@@ -1,4 +1,4 @@
-
+// Grand Overhaul: This component now displays a "CLOSING SOON" warning.
 import React from 'react';
 import { FightStatus } from '../types';
 
@@ -10,6 +10,9 @@ interface FightInfoBarProps {
 
 const FightInfoBar: React.FC<FightInfoBarProps> = ({ fightId, status, timer }) => {
   const getStatusText = () => {
+    if (status === FightStatus.BETTING_OPEN && timer <= 15 && timer > 0) {
+        return { text: 'CLOSING SOON', color: 'bg-yellow-500 animate-pulse' };
+    }
     switch (status) {
       case FightStatus.BETTING_OPEN:
         return { text: 'BETTING OPEN', color: 'bg-green-500' };

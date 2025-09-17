@@ -11,19 +11,27 @@ export const ALL_USERS_BY_ID: { [id: string]: AllUserTypes } = {
   } as Operator,
   '2': {
     id: '2', name: 'Master Agent 1', email: 'joms@gmail.com', password: 'x1qfoega',
-    role: UserRole.MASTER_AGENT, coinBalance: 1000000, commissionBalance: 0
+    role: UserRole.MASTER_AGENT, coinBalance: 1000000, commissionBalance: 0,
+    // FIX: Add missing properties to conform to MasterAgent type.
+    commissionRate: 0.07, transferFee: 0.01,
   } as MasterAgent,
   '3': {
     id: '3', name: 'Agent 1', email: 'agent1@test.com', password: 'password',
-    role: UserRole.AGENT, masterAgentId: '2', coinBalance: 50000
+    role: UserRole.AGENT, masterAgentId: '2', coinBalance: 50000,
+    // FIX: Add missing properties to conform to Agent type.
+    commissionRate: 0.07, transferFee: 0.01,
   } as Agent,
   '4': {
     id: '4', name: 'Agent 2', email: 'agent2@test.com', password: 'password',
-    role: UserRole.AGENT, masterAgentId: '2', coinBalance: 75000
+    role: UserRole.AGENT, masterAgentId: '2', coinBalance: 75000,
+    // FIX: Add missing properties to conform to Agent type.
+    commissionRate: 0.07, transferFee: 0.01,
   } as Agent,
   '5': {
     id: '5', name: 'GB Alpha', email: 'gbalpha@gmail.com', password: 'x1qfoega',
-    role: UserRole.MASTER_AGENT, coinBalance: 1000000, commissionBalance: 0
+    role: UserRole.MASTER_AGENT, coinBalance: 1000000, commissionBalance: 0,
+    // FIX: Add missing properties to conform to MasterAgent type.
+    commissionRate: 0.07, transferFee: 0.01,
   } as MasterAgent,
   '101': {
     id: '101', name: 'Player One', email: 'player1@test.com', password: 'password',

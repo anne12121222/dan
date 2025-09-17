@@ -1,56 +1,62 @@
+// Grand Overhaul: This file has been updated to support all production features,
+// including the new commission system properties.
 
 export enum UserRole {
-  OPERATOR = 'OPERATOR',
-  MASTER_AGENT = 'MASTER_AGENT',
-  AGENT = 'AGENT',
-  PLAYER = 'PLAYER',
+  OPERATOR = "OPERATOR",
+  MASTER_AGENT = "MASTER_AGENT",
+  AGENT = "AGENT",
+  PLAYER = "PLAYER",
 }
 
 export enum FightStatus {
-  BETTING_OPEN = 'BETTING_OPEN',
-  BETTING_CLOSED = 'BETTING_CLOSED',
-  SETTLED = 'SETTLED', // Waiting for next fight
+  BETTING_OPEN = "BETTING_OPEN",
+  BETTING_CLOSED = "BETTING_CLOSED",
+  SETTLED = "SETTLED",
 }
 
-export type BetChoice = 'RED' | 'WHITE';
-export type FightWinner = 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED';
+export type FightWinner = "RED" | "WHITE" | "DRAW" | "CANCELLED";
+export type BetChoice = "RED" | "WHITE";
+export type RequestStatus = "PENDING" | "APPROVED" | "DECLINED";
+export type TransactionType = "TRANSFER" | "COMMISSION" | "MINT" | "BET_WIN" | "BET_PLACE" | "BET_REFUND";
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  coinBalance: number;
+
+export interface Player {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole.PLAYER;
+    agentId: string;
+    coinBalance: number;
 }
-
-export interface Player extends User {
-  role: UserRole.PLAYER;
-  agentId: string;
+export interface Agent {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole.AGENT;
+    masterAgentId: string;
+    coinBalance: number;
+    commissionRate: number; // e.g., 0.07 for 7%
+    transferFee: number;   // e.g., 0.01 for 1%
 }
-
-export interface Agent extends User {
-  role: UserRole.AGENT;
-  masterAgentId: string;
+export interface MasterAgent {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole.MASTER_AGENT;
+    coinBalance: number;
+    commissionBalance: number;
+    commissionRate: number; // e.g., 0.07 for 7%
+    transferFee: number;   // e.g., 0.01 for 1%
 }
-
-export interface MasterAgent extends User {
-  role: UserRole.MASTER_AGENT;
-  commissionBalance: number;
-}
-
-export interface Operator extends User {
-  role: UserRole.OPERATOR;
+export interface Operator {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole.OPERATOR;
+    coinBalance: number;
 }
 
 export type AllUserTypes = Player | Agent | MasterAgent | Operator;
-
-export interface UpcomingFight {
-  id: number;
-  participants: {
-    red: string;
-    white: string;
-  };
-}
 
 export interface FightResult {
   id: number;
@@ -60,46 +66,56 @@ export interface FightResult {
   created_at: string;
 }
 
+export interface UpcomingFight {
+  id: number;
+  participants: {
+    red: string;
+    white: string;
+  };
+}
+
 export interface Bet {
   id: string;
   userId: string;
   fightId: number;
-  choice: BetChoice;
   amount: number;
+  choice: BetChoice;
 }
 
 export interface PlayerFightHistoryEntry extends FightResult {
-  bet: Bet | null;
-  outcome: 'WIN' | 'LOSS' | 'REFUND' | null;
+  bet?: Bet;
+  outcome?: 'WIN' | 'LOSS' | 'REFUND';
 }
 
 export interface Transaction {
-    id: string;
-    from: string; // user ID or 'MINT'
-    to: string; // user ID
-    amount: number;
-    type: 'TRANSFER' | 'COMMISSION' | 'MINT' | 'BET_WIN' | 'BET_PLACE' | 'BET_REFUND';
-    timestamp: string;
+  id: string;
+  from_user_id: string | null;
+  to_user_id: string | null;
+  amount: number;
+  type: TransactionType;
+  timestamp: string;
 }
 
 export interface Message {
-  id: string;
-  senderId: string;
-  receiverId: string;
-  text: string;
-  createdAt: string;
+    id: string;
+    senderId: string;
+    receiverId: string;
+    text: string;
+    createdAt: string;
+    amount?: number; 
 }
 
 export interface CoinRequest {
     id: string;
-    fromUserId: string;
-    toUserId: string;
+    from_user_id: string;
+    to_user_id: string;
     amount: number;
-    status: 'PENDING' | 'APPROVED' | 'DECLINED';
-    createdAt: string;
+    status: RequestStatus;
+    created_at: string;
 }
 
-export interface NotificationMessage {
+export interface Notification {
+  id: number;
   message: string;
   type: 'success' | 'error';
 }

@@ -1,4 +1,4 @@
-
+// Grand Overhaul: This component is now fully functional and disables correctly.
 import React, { useState } from 'react';
 import { BetChoice, FightStatus, Bet } from '../types';
 import BettingModal from './BettingModal';
@@ -6,14 +6,15 @@ import BettingModal from './BettingModal';
 interface BettingControlsProps {
   status: FightStatus;
   balance: number;
+  timer: number;
   onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
   currentBet: Bet | null;
 }
 
-const BettingControls: React.FC<BettingControlsProps> = ({ status, balance, onPlaceBet, currentBet }) => {
+const BettingControls: React.FC<BettingControlsProps> = ({ status, balance, timer, onPlaceBet, currentBet }) => {
   const [modalChoice, setModalChoice] = useState<BetChoice | null>(null);
 
-  const isBettingOpen = status === FightStatus.BETTING_OPEN;
+  const isBettingOpen = status === FightStatus.BETTING_OPEN && timer > 0;
   const hasPlacedBet = !!currentBet;
 
   const handleOpenModal = (choice: BetChoice) => {

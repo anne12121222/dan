@@ -49,6 +49,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           <BettingControls
             status={fightStatus}
             balance={currentUser.coinBalance}
+            // FIX: Pass the 'timer' prop to BettingControls as it's required.
+            timer={timer}
             onPlaceBet={onPlaceBet}
             currentBet={currentBet}
           />

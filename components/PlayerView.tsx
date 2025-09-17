@@ -18,9 +18,6 @@ interface PlayerViewProps {
   fightHistory: PlayerFightHistoryEntry[];
   onPlaceBet: (amount: number, choice: 'RED' | 'WHITE') => Promise<string | null>;
   currentBet: Bet | null;
-  isDrawerOpen: boolean;
-  onCloseDrawer: () => void;
-  upcomingFights: UpcomingFight[];
   onCreateCoinRequest: (amount: number) => Promise<string | null>;
 }
 
@@ -34,9 +31,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   fightHistory,
   onPlaceBet,
   currentBet,
-  isDrawerOpen,
-  onCloseDrawer,
-  upcomingFights,
   onCreateCoinRequest,
 }) => {
     const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
@@ -49,6 +43,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           <BettingControls
             status={fightStatus}
             balance={currentUser.coinBalance}
+            // FIX: Pass the 'timer' prop to BettingControls as it's required.
+            timer={timer}
             onPlaceBet={onPlaceBet}
             currentBet={currentBet}
           />
@@ -65,11 +61,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           <FightHistory fightHistory={fightHistory} />
         </div>
       </div>
-      <UpcomingFightsDrawer
-        isOpen={isDrawerOpen}
-        onClose={onCloseDrawer}
-        fights={upcomingFights}
-      />
        {isRequestModalOpen && (
         <RequestCoinsModal
             onClose={() => setIsRequestModalOpen(false)}

@@ -24,16 +24,17 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ title, transact
         ) : (
           <ul className="divide-y divide-gray-800">
             {[...transactions].reverse().map(tx => {
-              const fromName = tx.from === 'MINT' ? 'SYSTEM' : allUsers[tx.from]?.name || 'Unknown';
-              const toName = allUsers[tx.to]?.name || 'Unknown';
-              const isCredit = tx.to === currentUserId;
+              // FIX: Use correct snake_case properties and logic for transaction types.
+              const fromName = tx.type === 'MINT' ? 'SYSTEM' : allUsers[tx.from_user_id!]?.name || 'Unknown';
+              const toName = allUsers[tx.to_user_id!]?.name || 'Unknown';
+              const isCredit = tx.to_user_id === currentUserId;
 
               const getDescription = () => {
                 if (tx.type === 'COMMISSION') {
                   return isCredit ? `Commission from ${fromName}` : `Paid commission to ${toName}`;
                 }
-                if (tx.from === 'MINT') return `Minted to ${toName}`;
-                if (tx.from === currentUserId) return `Sent to ${toName}`;
+                if (tx.type === 'MINT') return `Minted to ${toName}`;
+                if (tx.from_user_id === currentUserId) return `Sent to ${toName}`;
                 return `Received from ${fromName}`;
               };
 
