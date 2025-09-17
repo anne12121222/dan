@@ -1,25 +1,36 @@
--- RESET SCRIPT: Safely drop existing objects before creating new ones.
-DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
-DROP POLICY IF EXISTS "Enable read access for all users" ON "public"."profiles";
-DROP POLICY IF EXISTS "Enable update for users based on user_id" ON "public"."profiles";
-DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON "public"."profiles";
+-- RESET SCRIPT: Safely drop all existing objects before creating new ones.
+-- This script is now idempotent and can be run multiple times without errors.
 
--- Drop types using CASCADE to also drop dependent functions
+-- Explicitly drop all functions with CASCADE to handle dependencies.
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.create_user(text, text, text, user_role) CASCADE;
+DROP FUNCTION IF EXISTS public.start_next_fight() CASCADE;
+DROP FUNCTION IF EXISTS public.close_betting(integer) CASCADE;
+DROP FUNCTION IF EXISTS public.declare_winner(integer, fight_winner) CASCADE;
+DROP FUNCTION IF EXISTS public.place_bet(integer, integer, bet_choice) CASCADE;
+DROP FUNCTION IF EXISTS public.create_coin_request(integer) CASCADE;
+DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, request_status) CASCADE;
+DROP FUNCTION IF EXISTS public.get_transactions_for_user() CASCADE;
+DROP FUNCTION IF EXISTS public.get_coin_requests_for_user() CASCADE;
+DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, integer) CASCADE;
+
+-- Drop all tables with CASCADE.
+DROP TABLE IF EXISTS public.messages CASCADE;
+DROP TABLE IF EXISTS public.transactions CASCADE;
+DROP TABLE IF EXISTS public.coin_requests CASCADE;
+DROP TABLE IF EXISTS public.bets CASCADE;
+DROP TABLE IF EXISTS public.upcoming_fights CASCADE;
+DROP TABLE IF EXISTS public.fights CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
+-- Drop all custom types with CASCADE. This is a final catch-all.
 DROP TYPE IF EXISTS public.request_status CASCADE;
 DROP TYPE IF EXISTS public.transaction_type CASCADE;
 DROP TYPE IF EXISTS public.bet_choice CASCADE;
 DROP TYPE IF EXISTS public.fight_winner CASCADE;
 DROP TYPE IF EXISTS public.fight_status CASCADE;
 DROP TYPE IF EXISTS public.user_role CASCADE;
-
--- Drop tables in reverse order of dependency
-DROP TABLE IF EXISTS public.messages;
-DROP TABLE IF EXISTS public.transactions;
-DROP TABLE IF EXISTS public.coin_requests;
-DROP TABLE IF EXISTS public.bets;
-DROP TABLE IF EXISTS public.upcoming_fights;
-DROP TABLE IF EXISTS public.fights;
-DROP TABLE IF EXISTS public.profiles;
 
 
 -- SETUP SCRIPT
@@ -112,13 +123,22 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
   _agent_id uuid;
+  _name text;
 BEGIN
+  -- Handle manual user creation from Supabase dashboard where raw_user_meta_data is empty.
+  -- Use the part of the email before the '@' as a default name if one isn't provided.
+  _name := COALESCE(
+    new.raw_user_meta_data->>'name',
+    SPLIT_PART(new.email, '@', 1)
+  );
+  
+  -- agent_id will be null if not provided, which is correct for manual creation.
   _agent_id := (new.raw_user_meta_data->>'agent_id')::uuid;
 
   INSERT INTO public.profiles (id, name, email, agent_id, master_agent_id)
   VALUES (
     new.id,
-    new.raw_user_meta_data->>'name',
+    _name, -- Use the safe name variable
     new.email,
     _agent_id,
     (SELECT p.master_agent_id FROM public.profiles p WHERE p.id = _agent_id)
@@ -133,7 +153,7 @@ AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
--- Function for Master Agent to create other users
+-- Function for Master Agent to create other users (FIXED with SECURITY DEFINER)
 CREATE OR REPLACE FUNCTION public.create_user(p_name text, p_email text, p_password text, p_role user_role)
 RETURNS text AS $$
 DECLARE

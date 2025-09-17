@@ -54,12 +54,10 @@ const ChatModal: React.FC<ChatModalProps> = ({
         <div className="flex-grow p-4 overflow-y-auto space-y-4">
           {messages.map((msg, index) => (
             <div
-              key={index} // Using index as key because IDs might not be present for optimistic updates
-              // FIX: Use camelCase property 'senderId' as defined in the Message type.
+              key={index}
               className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                // FIX: Use camelCase property 'senderId' as defined in the Message type.
                 className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                   msg.senderId === currentUser.id
                     ? 'bg-red-600 text-white'
@@ -67,7 +65,6 @@ const ChatModal: React.FC<ChatModalProps> = ({
                 }`}
               >
                 <p>{msg.text}</p>
-                 {/* FIX: Use camelCase property 'createdAt' as defined in the Message type. */}
                  <p className="text-xs opacity-60 mt-1 text-right">{new Date(msg.createdAt).toLocaleTimeString()}</p>
               </div>
             </div>

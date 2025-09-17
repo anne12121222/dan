@@ -63,7 +63,6 @@ const App: React.FC = () => {
             const usersMap = data.reduce((acc, user) => {
                 acc[user.id] = {
                     id: user.id, name: user.name, email: user.email, 
-                    // FIX: Cast string literal role from DB to UserRole enum.
                     role: user.role as UserRole,
                     coinBalance: user.coin_balance,
                     ...(user.role === 'PLAYER' && { agentId: user.agent_id }),
@@ -84,19 +83,16 @@ const App: React.FC = () => {
         // Player-specific data
         if (user.role === UserRole.PLAYER) {
             const { data: betHistoryData } = await supabase.from('bets').select('*').eq('user_id', user.id);
-            // FIX: Map database snake_case properties to application's camelCase properties.
-            if (betHistoryData) setPlayerBetHistory(betHistoryData.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, choice: b.choice, amount: b.amount } as Bet)));
+            if (betHistoryData) setPlayerBetHistory(betHistoryData.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, choice: b.choice, amount: b.amount })));
         }
 
         // Agent/MA specific data
         if (user.role === UserRole.AGENT || user.role === UserRole.MASTER_AGENT) {
             const { data: txData } = await supabase.rpc('get_transactions_for_user');
-            // FIX: Map database snake_case properties from RPC to application's camelCase properties.
-            if (txData) setTransactions(txData.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp } as Transaction)));
+            if (txData) setTransactions(txData.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp })));
 
             const { data: crData } = await supabase.rpc('get_coin_requests_for_user');
-            // FIX: Map database snake_case properties from RPC to application's camelCase properties.
-            if(crData) setCoinRequests(crData.map(cr => ({ id: cr.id, fromUserId: cr.from_user_id, toUserId: cr.to_user_id, amount: cr.amount, status: cr.status, createdAt: cr.created_at } as CoinRequest)));
+            if(crData) setCoinRequests(crData.map(cr => ({ id: cr.id, fromUserId: cr.from_user_id, toUserId: cr.to_user_id, amount: cr.amount, status: cr.status, createdAt: cr.created_at })));
         }
 
     }, []);
@@ -142,7 +138,6 @@ const App: React.FC = () => {
                 if (data) {
                     const user: AllUserTypes = {
                         id: data.id, name: data.name, email: data.email, 
-                        // FIX: Cast string literal role from DB to UserRole enum.
                         role: data.role as UserRole,
                         coinBalance: data.coin_balance,
                         ...(data.role === 'PLAYER' && { agentId: data.agent_id }),
@@ -216,8 +211,7 @@ const App: React.FC = () => {
         const betChannel = supabase.channel('bet-updates').on('postgres_changes', { event: '*', schema: 'public', table: 'bets', filter: `fight_id=eq.${fightId}` }, async () => {
             const { data: betsData } = await supabase.from('bets').select('*').eq('fight_id', fightId);
             if (betsData) {
-                // FIX: Map database snake_case properties to application's camelCase properties.
-                const typedBets = betsData.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, choice: b.choice, amount: b.amount } as Bet));
+                const typedBets = betsData.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, choice: b.choice, amount: b.amount }));
                 setCurrentBets(typedBets);
                 setPools(typedBets.reduce((acc, bet) => {
                     if (bet.choice === 'RED') acc.meron += bet.amount;
@@ -225,7 +219,6 @@ const App: React.FC = () => {
                     return acc;
                 }, { meron: 0, wala: 0 }));
                 if (currentUser.role === UserRole.PLAYER) {
-                    // FIX: Use correct camelCase property 'userId' for comparison.
                    setPlayerBet(typedBets.find(b => b.userId === currentUser.id) || null);
                 }
             }
@@ -242,8 +235,7 @@ const App: React.FC = () => {
         const requestChannel = supabase.channel('coin-request-updates').on('postgres_changes', { event: '*', schema: 'public', table: 'coin_requests' }, () => {
             if (currentUser.role === UserRole.AGENT || currentUser.role === UserRole.MASTER_AGENT) {
                 supabase.rpc('get_coin_requests_for_user').then(({data}) => {
-                    // FIX: Map database snake_case properties from RPC to application's camelCase properties.
-                    if(data) setCoinRequests(data.map(cr => ({ id: cr.id, fromUserId: cr.from_user_id, toUserId: cr.to_user_id, amount: cr.amount, status: cr.status, createdAt: cr.created_at } as CoinRequest)));
+                    if(data) setCoinRequests(data.map(cr => ({ id: cr.id, fromUserId: cr.from_user_id, toUserId: cr.to_user_id, amount: cr.amount, status: cr.status, createdAt: cr.created_at })));
                 });
             }
         }).subscribe();
@@ -251,8 +243,7 @@ const App: React.FC = () => {
         const transactionChannel = supabase.channel('transaction-updates').on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
             if (currentUser.role === UserRole.AGENT || currentUser.role === UserRole.MASTER_AGENT) {
                 supabase.rpc('get_transactions_for_user').then(({data}) => {
-                    // FIX: Map database snake_case properties from RPC to application's camelCase properties.
-                    if(data) setTransactions(data.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp } as Transaction)));
+                    if(data) setTransactions(data.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp })));
                 });
             }
         }).subscribe();
@@ -358,8 +349,7 @@ const App: React.FC = () => {
         setChatTargetUser(targetUser);
         const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: targetUser.id });
         if(error) { showNotification("Failed to load messages", 'error'); return; }
-        // FIX: Map database snake_case properties from RPC to application's camelCase properties.
-        if(data) setMessages(data.map(m => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.text || '', createdAt: m.created_at } as Message)));
+        if(data) setMessages(data.map(m => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.text || '', createdAt: m.created_at })));
     };
 
     const handleSendMessage = async (text: string, amount: number) => {
@@ -379,7 +369,6 @@ const App: React.FC = () => {
     }
 
     const playerFightHistory: PlayerFightHistoryEntry[] = fightHistory.map(fh => {
-       // FIX: Use correct camelCase property 'fightId' for comparison.
        const betOnThisFight = playerBetHistory.find(b => b.fightId === fh.id);
        let outcome: PlayerFightHistoryEntry['outcome'] = null;
        if (betOnThisFight) {
@@ -399,7 +388,6 @@ const App: React.FC = () => {
             case UserRole.AGENT:
                  return <AgentView currentUser={currentUser as Agent} players={Object.values(allUsers).filter(u => u.role === UserRole.PLAYER && (u as Player).agentId === currentUser.id) as Player[]} transactions={transactions} onOpenChat={handleOpenChat} allUsers={allUsers} unreadMessageCounts={unreadMessageCounts} pendingCoinRequests={coinRequests} onCreateCoinRequest={handleCreateCoinRequest} onRespondToCoinRequest={handleRespondToCoinRequest} />
             case UserRole.MASTER_AGENT:
-                // FIX: Correct the prop name from 'onCreateUser' to 'onCreateAgent' and pass a function that calls handleCreateUser with the 'AGENT' role.
                 return <MasterAgentView currentUser={currentUser as MasterAgent} agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT && (u as Agent).masterAgentId === currentUser.id) as Agent[]} transactions={transactions} onOpenChat={handleOpenChat} allUsers={allUsers} unreadMessageCounts={unreadMessageCounts} pendingCoinRequests={coinRequests} onCreateAgent={(name, email, password) => handleCreateUser(name, email, password, UserRole.AGENT)} onRespondToCoinRequest={handleRespondToCoinRequest} />
             default:
                 return <div className="text-white">Unknown user role. Please contact support.</div>;

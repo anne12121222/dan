@@ -56,7 +56,6 @@ export interface FightResult {
   id: number;
   winner: FightWinner | null;
   commission: number;
-  // FIX: Add missing properties to align with database schema and application usage.
   status: FightStatus;
   created_at: string;
 }
@@ -79,7 +78,6 @@ export interface Transaction {
     from: string; // user ID or 'MINT'
     to: string; // user ID
     amount: number;
-    // FIX: Widen transaction type to include all possibilities from the database.
     type: 'TRANSFER' | 'COMMISSION' | 'MINT' | 'BET_WIN' | 'BET_PLACE' | 'BET_REFUND';
     timestamp: string;
 }
@@ -101,7 +99,6 @@ export interface CoinRequest {
     createdAt: string;
 }
 
-// FIX: Add missing NotificationMessage type definition.
 export interface NotificationMessage {
   message: string;
   type: 'success' | 'error';
