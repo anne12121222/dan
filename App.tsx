@@ -1,317 +1,337 @@
 
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { UserRole, AllUserTypes, FightStatus, FightResult, UpcomingFight, Bet, Player, Agent, MasterAgent, Operator, Message, Transaction, CoinRequest, PlayerFightHistoryEntry, NotificationMessage } from './types';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import { AuthChangeEvent, Session } from '@supabase/supabase-js';
-import { AllUserTypes, UserRole, FightStatus, FightResult, Bet, Player, Transaction, Message, UpcomingFight, PlayerFightHistoryEntry, Agent, MasterAgent, Operator, CoinRequest } from './types';
+import { Session, User } from '@supabase/supabase-js';
 
-// Views
 import AuthView from './components/AuthView';
 import PlayerView from './components/PlayerView';
+import OperatorView from './components/OperatorView';
 import AgentView from './components/AgentView';
 import MasterAgentView from './components/MasterAgentView';
-import OperatorView from './components/OperatorView';
 import Header from './components/Header';
 import ChatModal from './components/ChatModal';
+import Notification from './components/Notification';
+import ChangePasswordModal from './components/ChangePasswordModal';
+
+// --- Helper Functions ---
+const mapDbProfileToUser = (profile: any): AllUserTypes => ({
+  id: profile.id,
+  name: profile.name,
+  email: profile.email,
+  role: profile.role as UserRole,
+  coinBalance: profile.coin_balance,
+  commissionBalance: profile.commission_balance,
+  agentId: profile.agent_id,
+  masterAgentId: profile.master_agent_id,
+});
 
 const App: React.FC = () => {
-  // Auth State
-  const [session, setSession] = useState<Session | null>(null);
-  const [currentUser, setCurrentUser] = useState<AllUserTypes | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  // App-wide State
-  const [allUsers, setAllUsers] = useState<{ [id: string]: AllUserTypes }>({});
-  
-  // Fight State
-  const [fightStatus, setFightStatus] = useState<FightStatus>(FightStatus.SETTLED);
-  const [fightId, setFightId] = useState(0);
-  // FIX: Widen type to handle all possible fight outcomes (DRAW, CANCELLED).
-  const [lastWinner, setLastWinner] = useState<'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null>(null);
-  const [timer, setTimer] = useState(60);
-  const [fightHistory, setFightHistory] = useState<FightResult[]>([]);
-  const [upcomingFights, setUpcomingFights] = useState<UpcomingFight[]>([]);
-  
-  // Betting State
-  const [pools, setPools] = useState({ meron: 0, wala: 0 });
-  const [currentBets, setCurrentBets] = useState<Bet[]>([]);
-  const [playerBet, setPlayerBet] = useState<Bet | null>(null);
-
-  // Hierarchy State (for different user roles)
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [players, setPlayers] = useState<Player[]>([]);
-
-  // Transaction & Messaging State
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [chatUser, setChatUser] = useState<AllUserTypes | null>(null);
-  const [unreadMessageCounts, setUnreadMessageCounts] = useState<{ [senderId: string]: number }>({});
-
-  // Coin Requests
-  const [pendingCoinRequests, setPendingCoinRequests] = useState<CoinRequest[]>([]);
-  
-  // UI State
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  // --- MOCK API & Data Fetching ---
-  // In a real app, these would be calls to your backend or Supabase functions/tables
-
-  const fetchInitialData = async (user: AllUserTypes) => {
-    // This function would fetch all necessary data based on the user's role
-    // For simplicity, we'll set up listeners instead
-  };
+    // --- State ---
+    const [session, setSession] = useState<Session | null>(null);
+    const [currentUser, setCurrentUser] = useState<AllUserTypes | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [allUsers, setAllUsers] = useState<{ [id: string]: AllUserTypes }>({});
+    const [agents, setAgents] = useState<Agent[]>([]);
+    
+    // Fight State
+    const [currentFight, setCurrentFight] = useState<FightResult | null>(null);
+    const [fightHistory, setFightHistory] = useState<FightResult[]>([]);
+    const [upcomingFights, setUpcomingFights] = useState<UpcomingFight[]>([]);
+    const [currentBets, setCurrentBets] = useState<Bet[]>([]);
+    const [timer, setTimer] = useState(60);
+    
+    // User-specific State
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [pendingCoinRequests, setPendingCoinRequests] = useState<CoinRequest[]>([]);
+    const [unreadMessageCounts, setUnreadMessageCounts] = useState<{ [senderId: string]: number }>({});
+    
+    // UI State
+    const [notification, setNotification] = useState<NotificationMessage | null>(null);
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+    const [chatTarget, setChatTarget] = useState<AllUserTypes | null>(null);
+    const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
 
 
-  // --- AUTHENTICATION ---
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event: AuthChangeEvent, session: Session | null) => {
-        setSession(session);
+    // --- Data Fetching and Real-time Subscriptions ---
+
+    const fetchInitialData = useCallback(async (user: User) => {
+      if (!supabase) return;
+      setLoading(true);
+
+      // Fetch all users for name lookups
+      const { data: profiles, error: profilesError } = await supabase.from('profiles').select('*');
+      if (profilesError) console.error('Error fetching profiles:', profilesError);
+      else {
+        const usersMap = Object.fromEntries(profiles.map(p => [p.id, mapDbProfileToUser(p)]));
+        setAllUsers(usersMap);
+        setAgents(profiles.filter(p => p.role === UserRole.AGENT).map(p => mapDbProfileToUser(p) as Agent));
       }
-    );
-    // Initial session load
-    supabase.auth.getSession().then(({ data: { session } }) => {
-        setSession(session);
-    });
 
-    return () => subscription.unsubscribe();
-  }, []);
+      // Fetch current fight and history
+      const { data: fights, error: fightsError } = await supabase.from('fights').select('*').order('id', { ascending: false });
+      if (fightsError) console.error('Error fetching fights:', fightsError);
+      else if (fights && fights.length > 0) {
+        setCurrentFight(fights[0] as FightResult);
+        setFightHistory(fights as FightResult[]);
+      }
 
-  useEffect(() => {
-    const fetchUserProfile = async () => {
-        if (session?.user) {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', session.user.id)
-                .single();
+      const { data: upcoming, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+      if (upcomingError) console.error('Error fetching upcoming fights:', upcomingError);
+      // FIX: Cast the data from Supabase to the expected UpcomingFight[] type.
+      // The 'participants' property is typed as 'Json' from the DB but is a structured object in the app.
+      else setUpcomingFights((upcoming || []) as UpcomingFight[]);
+      
+      const { data: userTransactions, error: txError } = await supabase.from('transactions').select('*').or(`from_user_id.eq.${user.id},to_user_id.eq.${user.id}`);
+      if (txError) console.error('Error fetching transactions:', txError);
+      // FIX: Map database transaction objects to the application's Transaction type.
+      // This resolves property name mismatches (e.g., from_user_id -> from) and type differences.
+      else {
+        const mappedTransactions: Transaction[] = (userTransactions || []).map(tx => ({
+            id: String(tx.id),
+            from: tx.from_user_id || 'MINT',
+            to: tx.to_user_id,
+            amount: tx.amount,
+            type: tx.type as 'TRANSFER' | 'COMMISSION' | 'MINT',
+            timestamp: tx.created_at
+        }));
+        setTransactions(mappedTransactions);
+      }
 
-            if (error) {
-                console.error('Error fetching user profile:', error);
-                // Maybe log out here
-                supabase.auth.signOut();
-                setCurrentUser(null);
-            } else if (data) {
-                const userProfile = {
-                    id: data.id,
-                    name: data.name,
-                    email: data.email,
-                    role: data.role as UserRole,
-                    coinBalance: data.coin_balance,
-                    // Add role-specific properties
-                    ...(data.role === UserRole.PLAYER && { agentId: data.agent_id }),
-                    ...(data.role === UserRole.AGENT && { masterAgentId: data.master_agent_id }),
-                    ...(data.role === UserRole.MASTER_AGENT && { commissionBalance: data.commission_balance }),
-                } as AllUserTypes;
-                setCurrentUser(userProfile);
-            }
-        } else {
-            setCurrentUser(null);
+      setLoading(false);
+    }, []);
+
+    useEffect(() => {
+        if (!supabase) {
+            setLoading(false);
+            return;
         }
-        setLoading(false);
-    };
 
-    fetchUserProfile();
-  }, [session]);
-  
-  // --- REAL-TIME SUBSCRIPTIONS ---
-  useEffect(() => {
-    if (!currentUser) return;
-    
-    // Listen to changes in the current fight
-    const fightChannel = supabase
-        .channel('current-fight-details')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'fights', filter: `id=eq.${fightId}`}, 
-            (payload) => {
-                const updatedFight = payload.new as FightResult;
-                if(updatedFight) {
-                  setFightStatus(updatedFight.status as FightStatus);
-                  if(updatedFight.status === FightStatus.SETTLED){
-                    setLastWinner(updatedFight.winner);
-                  }
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            setSession(session);
+            if (session?.user) {
+                const { data, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+                if (error) console.error('Error fetching user profile:', error);
+                else if (data) {
+                    const userProfile = mapDbProfileToUser(data);
+                    setCurrentUser(userProfile);
+                    fetchInitialData(session.user);
                 }
+            } else {
+                setCurrentUser(null);
+                setLoading(false);
             }
-        )
-        .subscribe();
-    
-    // A generic channel for app-wide events, like new fights starting
-    const appStateChannel = supabase
-        .channel('app-state')
-        .on('broadcast', { event: 'new_fight' }, (payload) => {
-            setFightId(payload.payload.id);
-            setFightStatus(FightStatus.BETTING_OPEN);
-            setLastWinner(null);
-            setPlayerBet(null); // Reset player's bet for the new fight
-        })
-        .on('broadcast', { event: 'timer_update' }, (payload) => {
-            setTimer(payload.payload.time);
-        })
-        .subscribe();
-
-    // ... other subscriptions for profiles, bets, messages, transactions etc.
-    // This would get quite large in a real app. Breaking it into custom hooks is a good pattern.
-
-    return () => {
-        supabase.removeChannel(fightChannel);
-        supabase.removeChannel(appStateChannel);
-    };
-  }, [currentUser, fightId]);
-
-  // --- Handlers ---
-  const handleLogin = async (email: string, password: string) => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    return error ? error.message : null;
-  };
-
-  const handleLogout = () => {
-    supabase.auth.signOut();
-    setCurrentUser(null);
-  };
-  
-  const handlePlaceBet = async (amount: number, choice: 'RED' | 'WHITE'): Promise<string | null> => {
-    if(!currentUser || currentUser.role !== UserRole.PLAYER) return "Only players can bet.";
-    if(currentUser.coinBalance < amount) return "Insufficient balance.";
-
-    const { error } = await supabase.rpc('place_bet', {
-        p_fight_id: fightId,
-        p_choice: choice,
-        p_amount: amount,
-    });
-
-    if(error){
-        console.error("Betting error:", error);
-        return error.message;
-    }
-    
-    // Optimistic update
-    setPlayerBet({ id: Math.random(), userId: currentUser.id, fightId, choice, amount });
-    setCurrentUser(prev => prev ? {...prev, coinBalance: prev.coinBalance - amount} : null);
-    
-    return null;
-  };
-  
-  // This is a stub for what the operator backend logic would do
-  const handleDeclareWinner = async (winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED') => {
-      // In a real app, this would be a call to a Supabase Edge Function
-      console.log(`Operator declared ${winner} as the winner for fight ${fightId}`);
-      // The function would handle settling bets, calculating commissions, updating balances, and setting the fight status to SETTLED.
-      // Then it would broadcast these changes, and the client listeners would update the UI.
-  };
-
-  const renderView = () => {
-    if (loading) {
-      return <div className="min-h-screen bg-zinc-900 flex items-center justify-center text-white">Loading...</div>;
-    }
-    if (!currentUser) {
-      return <AuthView onLogin={handleLogin} isSupabaseConfigured={isSupabaseConfigured}/>;
-    }
-    switch (currentUser.role) {
-      case UserRole.PLAYER:
-        const playerHistory: PlayerFightHistoryEntry[] = fightHistory.map(f => {
-            // Find if player bet on this fight
-            const bet = f.id === playerBet?.fightId ? playerBet : undefined; // Simplified, would check historical bets
-            const outcome = bet ? (bet.choice === f.winner ? 'WIN' : 'LOSS') : 'NONE';
-            return {...f, bet: bet ? { choice: bet.choice, amount: bet.amount } : undefined, outcome };
         });
+        return () => subscription.unsubscribe();
+    }, [fetchInitialData]);
+    
+    // Real-time subscriptions
+    useEffect(() => {
+        if (!supabase || !currentUser) return;
+        
+        const fightsChannel = supabase.channel('fights-channel')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, async () => {
+                const { data: fights, error } = await supabase.from('fights').select('*').order('id', { ascending: false });
+                if (error) console.error(error);
+                else if (fights && fights.length > 0) {
+                    setCurrentFight(fights[0] as FightResult);
+                    setFightHistory(fights as FightResult[]);
+                }
+            }).subscribe();
+            
+        const upcomingFightsChannel = supabase.channel('upcoming-fights-channel')
+             .on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, async () => {
+                const { data, error } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+                if (error) console.error(error);
+                // FIX: Cast the data from Supabase to the expected UpcomingFight[] type.
+                // The 'participants' property is typed as 'Json' from the DB but is a structured object in the app.
+                else setUpcomingFights((data || []) as UpcomingFight[]);
+             }).subscribe();
 
-        return <PlayerView 
-                    currentUser={currentUser as Player}
-                    fightStatus={fightStatus}
-                    lastWinner={lastWinner}
-                    fightId={fightId}
-                    timer={timer}
-                    pools={pools}
-                    fightHistory={playerHistory}
-                    onPlaceBet={handlePlaceBet}
-                    currentBet={playerBet}
-                    isDrawerOpen={isDrawerOpen}
-                    onCloseDrawer={() => setIsDrawerOpen(false)}
-                    upcomingFights={upcomingFights}
-                    onCreateCoinRequest={async () => null} // Stub
-                />;
-      case UserRole.AGENT:
-        return <AgentView
-                    currentUser={currentUser as Agent}
-                    players={players.filter(p => p.agentId === currentUser.id)}
-                    transactions={transactions}
-                    onOpenChat={setChatUser}
-                    allUsers={allUsers}
-                    unreadMessageCounts={unreadMessageCounts}
-                    pendingCoinRequests={pendingCoinRequests}
-                    onCreateCoinRequest={async () => null} // Stub
-                    onRespondToCoinRequest={async () => null} // Stub
-                />;
-      case UserRole.MASTER_AGENT:
-         return <MasterAgentView
-                    currentUser={currentUser as MasterAgent}
-                    agents={agents}
-                    players={players}
-                    transactions={transactions}
-                    fightHistory={fightHistory}
-                    onOpenChat={setChatUser}
-                    allUsers={allUsers}
-                    onCreateUser={async () => null} // Stub
-                    fightStatus={fightStatus}
-                    lastWinner={lastWinner}
-                    fightId={fightId}
-                    timer={timer}
-                    upcomingFights={upcomingFights}
-                    currentBets={currentBets}
-                    unreadMessageCounts={unreadMessageCounts}
-                    pendingCoinRequests={pendingCoinRequests}
-                    onRespondToCoinRequest={async () => null} // Stub
-                />;
-      case UserRole.OPERATOR:
-        return <OperatorView
-                    currentUser={currentUser as Operator}
-                    fightStatus={fightStatus}
-                    lastWinner={lastWinner}
-                    fightId={fightId}
-                    timer={timer}
-                    fightHistory={fightHistory}
-                    upcomingFights={upcomingFights}
-                    currentBets={currentBets}
-                    allUsers={allUsers}
-                    onStartNextFight={() => console.log('start')} // Stub
-                    onCloseBetting={() => console.log('close')} // Stub
-                    onDeclareWinner={handleDeclareWinner}
-                    onAddUpcomingFight={async () => null} // Stub
-                />;
-      default:
-        return <div>Unknown user role.</div>;
-    }
-  };
+        const betsChannel = supabase.channel('bets-channel')
+             .on('postgres_changes', { event: '*', schema: 'public', table: 'bets' }, async () => {
+                if (currentFight) {
+                    const { data, error } = await supabase.from('bets').select('*').eq('fight_id', currentFight.id);
+                    if (error) console.error(error);
+                    // FIX: Map database bet objects to the application's Bet type.
+                    // This resolves property name mismatches (e.g., user_id -> userId).
+                    else {
+                        const mappedBets: Bet[] = (data || []).map(b => ({
+                            id: String(b.id),
+                            userId: b.user_id,
+                            fightId: b.fight_id,
+                            choice: b.choice as 'RED' | 'WHITE',
+                            amount: b.amount,
+                        }));
+                        setCurrentBets(mappedBets);
+                    }
+                }
+             }).subscribe();
 
-  return (
-    <div className="bg-zinc-900 text-white min-h-screen font-sans">
-      {currentUser && (
-        <Header 
-          currentUser={currentUser} 
-          onLogout={handleLogout}
-          onToggleDrawer={currentUser.role === UserRole.PLAYER ? () => setIsDrawerOpen(!isDrawerOpen) : undefined}
-          onOpenChatWithSuperior={() => {
-              // Logic to find and open chat with superior
-          }}
-          unreadMessageCount={Object.values(unreadMessageCounts).reduce((a, b) => a + b, 0)}
-        />
-      )}
-      <main className="p-4 sm:p-6">
-          {renderView()}
-      </main>
-      {chatUser && currentUser && (
-          <ChatModal
-            currentUser={currentUser}
-            otherUser={chatUser}
-            messages={messages.filter(m => (m.senderId === currentUser.id && m.receiverId === chatUser.id) || (m.senderId === chatUser.id && m.receiverId === currentUser.id))}
-            onClose={() => setChatUser(null)}
-            onSendMessage={() => {}} // Stub
-            onSendCoins={() => {}} // Stub
-          />
-      )}
-    </div>
-  );
+        const profilesChannel = supabase.channel('profiles-channel')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, async (payload) => {
+                const updatedProfile = mapDbProfileToUser(payload.new);
+                setAllUsers(prev => ({ ...prev, [updatedProfile.id]: updatedProfile }));
+                if (updatedProfile.id === currentUser.id) {
+                    setCurrentUser(updatedProfile); // Update current user's balance in real-time
+                }
+            }).subscribe();
+
+        // More subscriptions for transactions, messages, etc. can be added here
+        
+        return () => {
+            supabase.removeChannel(fightsChannel);
+            supabase.removeChannel(upcomingFightsChannel);
+            supabase.removeChannel(betsChannel);
+            supabase.removeChannel(profilesChannel);
+        };
+
+    }, [currentUser, currentFight]);
+
+    // Timer logic
+    useEffect(() => {
+        if (currentFight?.status === FightStatus.BETTING_OPEN) {
+            const fightStartTime = new Date(currentFight.created_at).getTime();
+            const interval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - fightStartTime) / 1000);
+                const timeLeft = 60 - elapsed;
+                setTimer(timeLeft > 0 ? timeLeft : 0);
+            }, 1000);
+            return () => clearInterval(interval);
+        }
+    }, [currentFight]);
+
+
+    // --- Handlers ---
+    const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+        setNotification({ message, type });
+    };
+
+    const handleLogin = async (email: string, password: string): Promise<string | null> => {
+        if (!supabase) return "Supabase client not available.";
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        return error ? error.message : null;
+    };
+
+    const handleRegister = async (name: string, email: string, password: string, agentId: string | null): Promise<string | null> => {
+        if (!supabase) return "Supabase client not available.";
+        const { error } = await supabase.auth.signUp({ 
+            email, 
+            password, 
+            options: { data: { name, agent_id: agentId } } 
+        });
+        return error ? error.message : null;
+    };
+
+    const handleLogout = async () => {
+        if (!supabase) return;
+        await supabase.auth.signOut();
+        setCurrentUser(null);
+        setSession(null);
+        showNotification("You have been logged out.", "success");
+    };
+    
+    const handleChangePassword = async (oldPassword: string, newPassword: string): Promise<string | null> => {
+        if (!supabase) return "Supabase not configured";
+        // Note: Supabase doesn't have a direct "change password with old password" RPC.
+        // A proper implementation would require a custom Edge Function for security.
+        // For now, we use the user update method which assumes the user is logged in.
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if(error) return error.message;
+        return null;
+    };
+
+    // --- RPC Handlers ---
+    const rpcCall = async (functionName: any, args: any, successMessage: string) => {
+        if (!supabase) return "Supabase not available.";
+        const { error } = await supabase.rpc(functionName, args);
+        if (error) {
+            showNotification(error.message, 'error');
+            return error.message;
+        }
+        showNotification(successMessage, 'success');
+        return null;
+    };
+
+    const handlePlaceBet = (amount: number, choice: 'RED' | 'WHITE') => rpcCall('place_bet', { p_fight_id: currentFight!.id, p_choice: choice, p_amount: amount }, `Bet of ${amount} on ${choice} placed!`);
+    const handleStartNextFight = () => rpcCall('start_next_fight', {}, 'Next fight started!');
+    const handleCloseBetting = () => rpcCall('close_betting', { p_fight_id: currentFight!.id }, 'Betting is now closed.');
+    const handleDeclareWinner = (winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED') => rpcCall('declare_winner', { p_fight_id: currentFight!.id, p_winner: winner }, `${winner} declared as winner!`);
+    const handleAddUpcomingFight = (red: string, white: string) => rpcCall('add_upcoming_fight', { participants: { red, white } }, 'Upcoming fight added.');
+    const handleCreateAgent = (name: string, email: string, password: string) => rpcCall('create_user', { p_name: name, p_email: email, p_password: password, p_role: 'AGENT', p_master_agent_id: currentUser!.id }, 'Agent created successfully!');
+    const handleCreateCoinRequest = (amount: number) => {
+        if (!supabase || !currentUser || !('agentId' in currentUser)) return Promise.resolve("Invalid user type");
+        return rpcCall('create_coin_request', { p_to_user_id: currentUser.agentId, p_amount: amount }, `Requested ${amount} coins.`);
+    };
+    const handleRespondToCoinRequest = (requestId: string, response: 'APPROVED' | 'DECLINED') => rpcCall('respond_to_coin_request', { p_request_id: requestId, p_response: response }, `Request ${response.toLowerCase()}.`);
+    
+
+    // --- Derived State ---
+    const pools = currentBets.reduce((acc, bet) => {
+        if (bet.choice === 'RED') acc.meron += bet.amount;
+        if (bet.choice === 'WHITE') acc.wala += bet.amount;
+        return acc;
+    }, { meron: 0, wala: 0 });
+
+    const playerFightHistory: PlayerFightHistoryEntry[] = fightHistory.map(result => {
+        const playerBetOnFight = currentBets.find(b => b.fightId === result.id && b.userId === currentUser?.id);
+        let outcome: 'WIN' | 'LOSS' | 'REFUND' | null = null;
+        if(playerBetOnFight) {
+            if (result.winner === 'DRAW' || result.winner === 'CANCELLED') outcome = 'REFUND';
+            else if (result.winner === playerBetOnFight.choice) outcome = 'WIN';
+            else outcome = 'LOSS';
+        }
+        return { ...result, bet: playerBetOnFight || null, outcome };
+    });
+    
+    // --- Render Logic ---
+    const renderView = () => {
+        if (loading) return <div className="min-h-screen flex items-center justify-center bg-zinc-900 text-white">Loading...</div>;
+        if (!currentUser) return <AuthView onLogin={handleLogin} onRegister={handleRegister} isSupabaseConfigured={!!supabase} agents={agents} />;
+
+        switch (currentUser.role) {
+            case UserRole.PLAYER:
+                // FIX: Removed redundant type assertion `as FightStatus` since `currentFight.status` now has the correct type from `FightResult`.
+                return <PlayerView currentUser={currentUser as Player} fightStatus={currentFight?.status || FightStatus.SETTLED} lastWinner={currentFight?.winner || null} fightId={currentFight?.id || 0} timer={timer} pools={pools} fightHistory={playerFightHistory} onPlaceBet={handlePlaceBet} currentBet={currentBets.find(b => b.userId === currentUser.id) || null} isDrawerOpen={isDrawerOpen} onCloseDrawer={() => setIsDrawerOpen(false)} upcomingFights={upcomingFights} onCreateCoinRequest={handleCreateCoinRequest} />;
+            case UserRole.OPERATOR:
+                // FIX: Removed redundant type assertion `as FightStatus` since `currentFight.status` now has the correct type from `FightResult`.
+                return <OperatorView currentUser={currentUser as Operator} fightStatus={currentFight?.status || FightStatus.SETTLED} lastWinner={currentFight?.winner || null} fightId={currentFight?.id || 0} timer={timer} fightHistory={fightHistory} upcomingFights={upcomingFights} currentBets={currentBets} allUsers={allUsers} onStartNextFight={handleStartNextFight} onCloseBetting={handleCloseBetting} onDeclareWinner={handleDeclareWinner} onAddUpcomingFight={handleAddUpcomingFight} />;
+            case UserRole.AGENT:
+                 const agentPlayers = Object.values(allUsers).filter(u => u.role === UserRole.PLAYER && 'agentId' in u && u.agentId === currentUser.id) as Player[];
+                return <AgentView currentUser={currentUser as Agent} players={agentPlayers} transactions={transactions} onOpenChat={setChatTarget} allUsers={allUsers} unreadMessageCounts={unreadMessageCounts} pendingCoinRequests={pendingCoinRequests} onCreateCoinRequest={handleCreateCoinRequest} onRespondToCoinRequest={handleRespondToCoinRequest} />;
+            case UserRole.MASTER_AGENT:
+                const masterAgentAgents = Object.values(allUsers).filter(u => u.role === UserRole.AGENT && 'masterAgentId' in u && u.masterAgentId === currentUser.id) as Agent[];
+                return <MasterAgentView currentUser={currentUser as MasterAgent} agents={masterAgentAgents} transactions={transactions} onOpenChat={setChatTarget} allUsers={allUsers} unreadMessageCounts={unreadMessageCounts} pendingCoinRequests={pendingCoinRequests} onCreateAgent={handleCreateAgent} onRespondToCoinRequest={handleRespondToCoinRequest} />;
+            default:
+                return <div className="text-red-500">Error: Unknown user role.</div>;
+        }
+    };
+    
+    return (
+        <div className="bg-zinc-900 text-gray-200 min-h-screen font-sans">
+            {currentUser && <Header currentUser={currentUser} onLogout={handleLogout} onSettings={() => setSettingsModalOpen(true)} onToggleDrawer={() => setIsDrawerOpen(!isDrawerOpen)} />}
+            <main className="p-4 md:p-6">
+                {renderView()}
+            </main>
+            {chatTarget && currentUser && (
+                <ChatModal currentUser={currentUser} otherUser={chatTarget} messages={messages} onClose={() => setChatTarget(null)} onSendMessage={() => {}} onSendCoins={() => {}} />
+            )}
+            {isSettingsModalOpen && (
+                <ChangePasswordModal
+                    onClose={() => setSettingsModalOpen(false)}
+                    onChangePassword={handleChangePassword}
+                />
+            )}
+            {notification && (
+                <Notification
+                    message={notification.message}
+                    type={notification.type}
+                    onClose={() => setNotification(null)}
+                />
+            )}
+        </div>
+    );
 };
 
 export default App;

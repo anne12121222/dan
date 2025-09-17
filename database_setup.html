@@ -1,1 +1,256 @@
-full contents of database_setup.html
+-- This script is now idempotent, meaning it can be run multiple times safely.
+-- It will drop existing objects before recreating them to ensure a clean setup.
+
+-- 1. DROP EXISTING OBJECTS
+-- Drop triggers, policies, functions, tables, and types in reverse order of dependency.
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP POLICY IF EXISTS "Users can see their own coin requests" ON public.coin_requests;
+DROP POLICY IF EXISTS "Users can see their own messages" ON public.messages;
+DROP POLICY IF EXISTS "Users can see their own transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Users can see all bets" ON public.bets;
+DROP POLICY IF EXISTS "All users can see upcoming fights" ON public.upcoming_fights;
+DROP POLICY IF EXISTS "All users can see fights" ON public.fights;
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can see all profiles" ON public.profiles;
+
+DROP FUNCTION IF EXISTS public.send_coins(uuid, numeric);
+DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, coin_request_status);
+DROP FUNCTION IF EXISTS public.create_user(text, text, text, user_role, uuid);
+DROP FUNCTION IF EXISTS public.declare_winner(bigint, winner_choice);
+DROP FUNCTION IF EXISTS public.close_betting(bigint);
+DROP FUNCTION IF EXISTS public.start_next_fight();
+DROP FUNCTION IF EXISTS public.place_bet(bigint, bet_choice, numeric);
+DROP FUNCTION IF EXISTS public.handle_new_user();
+
+DROP TABLE IF EXISTS public.coin_requests;
+DROP TABLE IF EXISTS public.messages;
+DROP TABLE IF EXISTS public.transactions;
+DROP TABLE IF EXISTS public.bets;
+DROP TABLE IF EXISTS public.upcoming_fights;
+DROP TABLE IF EXISTS public.fights;
+DROP TABLE IF EXISTS public.profiles;
+
+DROP TYPE IF EXISTS public.transaction_type;
+DROP TYPE IF EXISTS public.coin_request_status;
+DROP TYPE IF EXISTS public.winner_choice;
+DROP TYPE IF EXISTS public.bet_choice;
+DROP TYPE IF EXISTS public.fight_status;
+DROP TYPE IF EXISTS public.user_role;
+
+
+-- 2. CREATE NEW OBJECTS
+
+-- ROLES and STATUS ENUMS
+create type public.user_role as enum ('PLAYER', 'AGENT', 'MASTER_AGENT', 'OPERATOR');
+create type public.fight_status as enum ('IDLE', 'BETTING_OPEN', 'BETTING_CLOSED', 'SETTLED');
+create type public.bet_choice as enum ('RED', 'WHITE');
+create type public.winner_choice as enum ('RED', 'WHITE', 'DRAW', 'CANCELLED');
+create type public.coin_request_status as enum ('PENDING', 'APPROVED', 'DECLINED');
+create type public.transaction_type as enum ('MINT', 'TRANSFER', 'COMMISSION', 'BET_WIN', 'BET_PLACE', 'BET_REFUND');
+
+-- PROFILES TABLE
+create table public.profiles (
+  id uuid references auth.users not null primary key,
+  name text not null,
+  email text not null,
+  role user_role not null default 'PLAYER',
+  agent_id uuid references public.profiles,
+  master_agent_id uuid references public.profiles,
+  coin_balance numeric not null default 0,
+  commission_balance numeric not null default 0
+);
+comment on table public.profiles is 'Public profile information for each user.';
+comment on column public.profiles.id is 'Links to auth.users.id.';
+
+-- OTHER TABLES
+create table public.fights (
+  id bigserial primary key,
+  status fight_status not null default 'IDLE',
+  winner winner_choice,
+  participants jsonb,
+  commission numeric not null default 0,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table public.upcoming_fights (
+  id bigserial primary key,
+  participants jsonb not null
+);
+
+create table public.bets (
+  id bigserial primary key,
+  user_id uuid references public.profiles not null,
+  fight_id bigint references public.fights not null,
+  choice bet_choice not null,
+  amount numeric not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table public.transactions (
+  id bigserial primary key,
+  from_user_id uuid references public.profiles,
+  to_user_id uuid references public.profiles not null,
+  amount numeric not null,
+  type transaction_type not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table public.messages (
+  id bigserial primary key,
+  sender_id uuid references public.profiles not null,
+  receiver_id uuid references public.profiles not null,
+  text text not null,
+  is_read boolean default false,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table public.coin_requests (
+  id uuid primary key default gen_random_uuid(),
+  from_user_id uuid references public.profiles not null,
+  to_user_id uuid references public.profiles not null,
+  amount numeric not null,
+  status coin_request_status not null default 'PENDING',
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- ROW LEVEL SECURITY (RLS)
+alter table public.profiles enable row level security;
+create policy "Users can see all profiles" on public.profiles for select using (true);
+create policy "Users can update their own profile" on public.profiles for update using (auth.uid() = id);
+
+alter table public.fights enable row level security;
+create policy "All users can see fights" on public.fights for select using (true);
+
+alter table public.upcoming_fights enable row level security;
+create policy "All users can see upcoming fights" on public.upcoming_fights for select using (true);
+
+alter table public.bets enable row level security;
+create policy "Users can see all bets" on public.bets for select using (true);
+
+alter table public.transactions enable row level security;
+create policy "Users can see their own transactions" on public.transactions for select using (auth.uid() = from_user_id or auth.uid() = to_user_id);
+
+alter table public.messages enable row level security;
+create policy "Users can see their own messages" on public.messages for select using (auth.uid() = sender_id or auth.uid() = receiver_id);
+
+alter table public.coin_requests enable row level security;
+create policy "Users can see their own coin requests" on public.coin_requests for select using (auth.uid() = from_user_id or auth.uid() = to_user_id);
+
+-- DATABASE FUNCTIONS (for RPC)
+create function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, name, email, role, agent_id)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'name',
+    new.email,
+    'PLAYER',
+    (new.raw_user_meta_data->>'agent_id')::uuid
+  );
+  return new;
+end;
+$$;
+create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+
+create function public.place_bet(p_fight_id bigint, p_choice bet_choice, p_amount numeric)
+returns void language plpgsql as $$
+begin
+  if (select status from public.fights where id = p_fight_id) != 'BETTING_OPEN' then raise exception 'Betting is not open.'; end if;
+  if (select coin_balance from public.profiles where id = auth.uid()) < p_amount then raise exception 'Insufficient balance.'; end if;
+  update public.profiles set coin_balance = coin_balance - p_amount where id = auth.uid();
+  insert into public.bets (user_id, fight_id, choice, amount) values (auth.uid(), p_fight_id, p_choice, p_amount);
+  insert into public.transactions (from_user_id, to_user_id, amount, type) values (auth.uid(), null, p_amount, 'BET_PLACE');
+end;
+$$;
+
+create function public.start_next_fight() returns void language plpgsql security definer set search_path = public as $$
+declare next_fight record;
+begin
+  select * into next_fight from public.upcoming_fights order by id asc limit 1;
+  if not found then raise exception 'No upcoming fights.'; end if;
+  insert into public.fights (status, participants) values ('BETTING_OPEN', next_fight.participants);
+  delete from public.upcoming_fights where id = next_fight.id;
+end;
+$$;
+
+create function public.close_betting(p_fight_id bigint) returns void language plpgsql security definer set search_path = public as $$
+begin
+  update public.fights set status = 'BETTING_CLOSED' where id = p_fight_id and status = 'BETTING_OPEN';
+end;
+$$;
+
+create function public.declare_winner(p_fight_id bigint, p_winner winner_choice) returns void language plpgsql security definer set search_path = public as $$
+declare bet_record record; total_pool numeric; winner_pool numeric; payout_rate numeric; total_commission numeric := 0; commission_rate numeric := 0.10;
+begin
+  update public.fights set winner = p_winner, status = 'SETTLED' where id = p_fight_id;
+  if p_winner = 'DRAW' or p_winner = 'CANCELLED' then
+    for bet_record in select * from public.bets where fight_id = p_fight_id loop
+      update public.profiles set coin_balance = coin_balance + bet_record.amount where id = bet_record.user_id;
+      insert into public.transactions (from_user_id, to_user_id, amount, type) values (null, bet_record.user_id, bet_record.amount, 'BET_REFUND');
+    end loop; return;
+  end if;
+  select sum(amount) into total_pool from public.bets where fight_id = p_fight_id;
+  select sum(amount) into winner_pool from public.bets where fight_id = p_fight_id and choice::text = p_winner::text;
+  payout_rate := case when winner_pool > 0 then total_pool / winner_pool else 0 end;
+  for bet_record in select * from public.bets where fight_id = p_fight_id and choice::text = p_winner::text loop
+    declare winnings numeric := bet_record.amount * payout_rate; player_commission numeric := (winnings - bet_record.amount) * commission_rate; agent_record record; master_agent_record record;
+    begin
+      total_commission := total_commission + player_commission;
+      update public.profiles set coin_balance = coin_balance + winnings where id = bet_record.user_id;
+      insert into public.transactions (from_user_id, to_user_id, amount, type) values (null, bet_record.user_id, winnings, 'BET_WIN');
+      select * into agent_record from public.profiles where id = (select agent_id from public.profiles where id = bet_record.user_id);
+      if found then
+        update public.profiles set coin_balance = coin_balance + (player_commission * 0.5) where id = agent_record.id;
+        insert into public.transactions (from_user_id, to_user_id, amount, type) values (bet_record.user_id, agent_record.id, player_commission * 0.5, 'COMMISSION');
+        select * into master_agent_record from public.profiles where id = agent_record.master_agent_id;
+        if found then
+           update public.profiles set commission_balance = commission_balance + (player_commission * 0.5) where id = master_agent_record.id;
+           insert into public.transactions (from_user_id, to_user_id, amount, type) values (agent_record.id, master_agent_record.id, player_commission * 0.5, 'COMMISSION');
+        end if;
+      end if;
+    end;
+  end loop;
+  update public.fights set commission = total_commission where id = p_fight_id;
+end;
+$$;
+
+create function public.create_user(p_name text, p_email text, p_password text, p_role user_role, p_master_agent_id uuid) returns uuid language plpgsql security definer set search_path = public as $$
+declare new_user_id uuid;
+begin
+  new_user_id := (select id from auth.users where email = p_email);
+  if new_user_id is null then
+    new_user_id := (select auth.sign_up(p_email, p_password, jsonb_build_object('name', p_name)));
+  end if;
+  update public.profiles set role = p_role, master_agent_id = p_master_agent_id where id = new_user_id;
+  return new_user_id;
+end;
+$$;
+
+create function public.respond_to_coin_request(p_request_id uuid, p_response coin_request_status) returns void language plpgsql as $$
+declare request record;
+begin
+  select * into request from public.coin_requests where id = p_request_id and status = 'PENDING';
+  if not found then raise exception 'Request not found or already handled.'; end if;
+  update public.coin_requests set status = p_response where id = p_request_id;
+  if p_response = 'APPROVED' then
+    if (select coin_balance from public.profiles where id = request.to_user_id) < request.amount then raise exception 'Insufficient balance.'; end if;
+    update public.profiles set coin_balance = coin_balance - request.amount where id = request.to_user_id;
+    update public.profiles set coin_balance = coin_balance + request.amount where id = request.from_user_id;
+    insert into public.transactions (from_user_id, to_user_id, amount, type) values (request.to_user_id, request.from_user_id, request.amount, 'TRANSFER');
+  end if;
+end;
+$$;
+
+create function public.send_coins(p_receiver_id uuid, p_amount numeric) returns void language plpgsql as $$
+begin
+  if (select coin_balance from public.profiles where id = auth.uid()) < p_amount then raise exception 'Insufficient balance.'; end if;
+  update public.profiles set coin_balance = coin_balance - p_amount where id = auth.uid();
+  update public.profiles set coin_balance = coin_balance + p_amount where id = p_receiver_id;
+  insert into public.transactions (from_user_id, to_user_id, amount, type) values (auth.uid(), p_receiver_id, p_amount, 'TRANSFER');
+end;
+$$;
+
+-- Enable real-time for all tables
+alter publication supabase_realtime add table public.profiles, public.fights, public.upcoming_fights, public.bets, public.transactions, public.messages, public.coin_requests;

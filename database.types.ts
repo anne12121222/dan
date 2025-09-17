@@ -44,7 +44,6 @@ export interface Database {
           commission_balance?: number
           email?: string
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       fights: {
@@ -68,7 +67,6 @@ export interface Database {
           winner?: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
           commission?: number
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       upcoming_fights: {
@@ -80,12 +78,10 @@ export interface Database {
           id?: number
           participants: Json
         }
-        // FIX: Added missing Update property
         Update: {
           id?: number
           participants?: Json
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       bets: {
@@ -103,14 +99,12 @@ export interface Database {
           choice: string
           amount: number
         }
-        // FIX: Added missing Update property
         Update: {
           user_id?: string
           fight_id?: number
           choice?: string
           amount?: number
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       messages: {
@@ -126,13 +120,11 @@ export interface Database {
             receiver_id: string
             text: string
         }
-        // FIX: Added missing Update property
         Update: {
             sender_id?: string
             receiver_id?: string
             text?: string
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       transactions: {
@@ -150,19 +142,17 @@ export interface Database {
             amount: number
             type: string
         }
-        // FIX: Added missing Update property
         Update: {
             from_user_id?: string | null
             to_user_id?: string
             amount?: number
             type?: string
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
       coin_requests: {
         Row: {
-            id: string // Changed to string to match app logic
+            id: string 
             from_user_id: string
             to_user_id: string
             amount: number
@@ -170,7 +160,7 @@ export interface Database {
             created_at: string
         }
         Insert: {
-            id: string
+            id?: string
             from_user_id: string
             to_user_id: string
             amount: number
@@ -179,7 +169,6 @@ export interface Database {
         Update: {
             status?: string
         }
-        // FIX: Added missing Relationships property to ensure proper type inference.
         Relationships: []
       }
     }
@@ -188,15 +177,33 @@ export interface Database {
     }
     Functions: {
       place_bet: {
-        Args: {
-          p_fight_id: number
-          p_choice: string
-          p_amount: number
-        }
-        // FIX: Changed return type to `undefined`. RPC functions that don't return a value
-        // must use `undefined` for correct Supabase type inference.
-        Returns: undefined
-      }
+        Args: { p_fight_id: number; p_choice: string; p_amount: number };
+        Returns: undefined;
+      };
+      start_next_fight: {
+        Args: {};
+        Returns: undefined;
+      };
+      close_betting: {
+        Args: { p_fight_id: number };
+        Returns: undefined;
+      };
+      declare_winner: {
+        Args: { p_fight_id: number; p_winner: string };
+        Returns: undefined;
+      };
+      create_user: {
+        Args: { p_name: string; p_email: string; p_password: string; p_role: string; p_master_agent_id: string };
+        Returns: string; // returns new user_id
+      };
+      respond_to_coin_request: {
+        Args: { p_request_id: string; p_response: string };
+        Returns: undefined;
+      };
+      send_coins: {
+        Args: { p_receiver_id: string; p_amount: number };
+        Returns: undefined;
+      };
     }
     Enums: {
       [key: string]: never

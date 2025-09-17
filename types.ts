@@ -1,110 +1,107 @@
+
 export enum UserRole {
-  PLAYER = 'PLAYER',
-  AGENT = 'AGENT',
-  MASTER_AGENT = 'MASTER_AGENT',
   OPERATOR = 'OPERATOR',
+  MASTER_AGENT = 'MASTER_AGENT',
+  AGENT = 'AGENT',
+  PLAYER = 'PLAYER',
 }
 
-export interface BaseUser {
-  id: string; // Changed from number to string for UUIDs
+export enum FightStatus {
+  BETTING_OPEN = 'BETTING_OPEN',
+  BETTING_CLOSED = 'BETTING_CLOSED',
+  SETTLED = 'SETTLED', // Waiting for next fight
+}
+
+export type BetChoice = 'RED' | 'WHITE';
+export type FightWinner = 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED';
+
+export interface User {
+  id: string;
   name: string;
   email: string;
-  password?: string; // Password is now optional as it won't be stored in client state
   role: UserRole;
   coinBalance: number;
 }
 
-export interface Player extends BaseUser {
+export interface Player extends User {
   role: UserRole.PLAYER;
-  agentId: string; // Changed from number to string
+  agentId: string;
 }
 
-export interface Agent extends BaseUser {
+export interface Agent extends User {
   role: UserRole.AGENT;
-  masterAgentId: string; // Changed from number to string
+  masterAgentId: string;
 }
 
-export interface MasterAgent extends BaseUser {
+export interface MasterAgent extends User {
   role: UserRole.MASTER_AGENT;
   commissionBalance: number;
 }
 
-export interface Operator extends BaseUser {
+export interface Operator extends User {
   role: UserRole.OPERATOR;
 }
 
 export type AllUserTypes = Player | Agent | MasterAgent | Operator;
 
-export enum FightStatus {
-  IDLE = 'IDLE',
-  BETTING_OPEN = 'BETTING_OPEN',
-  BETTING_CLOSED = 'BETTING_CLOSED',
-  SETTLED = 'SETTLED', // Fight finished, waiting for next one
+export interface UpcomingFight {
+  id: number;
+  participants: {
+    red: string;
+    white: string;
+  };
 }
 
-export type BetChoice = 'RED' | 'WHITE';
+export interface FightResult {
+  id: number;
+  winner: FightWinner | null;
+  commission: number;
+  // FIX: Add missing properties to align with database schema and application usage.
+  status: FightStatus;
+  created_at: string;
+}
 
 export interface Bet {
-  id: number;
-  userId: string; // Changed from number to string
+  id: string;
+  userId: string;
   fightId: number;
   choice: BetChoice;
   amount: number;
 }
 
-export interface FightResult {
-  id: number;
-  // FIX: Add status property to align with database schema and fix type errors.
-  status: FightStatus;
-  winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
-  participants: { red: string; white: string };
-  commission: number;
-}
-
 export interface PlayerFightHistoryEntry extends FightResult {
-  bet?: {
-    choice: BetChoice;
-    amount: number;
-  };
-  outcome: 'WIN' | 'LOSS' | 'NONE';
+  bet: Bet | null;
+  outcome: 'WIN' | 'LOSS' | 'REFUND' | null;
 }
 
 export interface Transaction {
     id: string;
-    from: string | 'MINT'; // Changed from number to string
-    to: string; // Changed from number to string
+    from: string; // user ID or 'MINT'
+    to: string; // user ID
     amount: number;
-    timestamp: number; // unix timestamp
-    type?: 'COIN_TRANSFER' | 'COMMISSION';
+    type: 'TRANSFER' | 'COMMISSION' | 'MINT';
+    timestamp: string;
 }
 
 export interface Message {
-    id: string;
-    senderId: string; // Changed from number to string
-    receiverId: string; // Changed from number to string
-    text: string;
-    timestamp: number;
-}
-
-export interface UpcomingFight {
-    id: number;
-    participants: {
-        red: string;
-        white: string;
-    };
-}
-
-export enum CoinRequestStatus {
-    PENDING = 'PENDING',
-    APPROVED = 'APPROVED',
-    DECLINED = 'DECLINED',
+  id: string;
+  senderId: string;
+  receiverId: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface CoinRequest {
     id: string;
-    fromUserId: string; // Changed from number to string
-    toUserId: string; // Changed from number to string
+    fromUserId: string;
+    toUserId: string;
     amount: number;
-    status: CoinRequestStatus;
-    timestamp: number;
+    status: 'PENDING' | 'APPROVED' | 'DECLINED';
+    createdAt: string;
+}
+
+// FIX: Add missing NotificationMessage type definition.
+export interface NotificationMessage {
+  message: string;
+  type: 'success' | 'error';
 }
