@@ -137,6 +137,7 @@ CREATE POLICY "Users can create coin requests." ON public.coin_requests FOR INSE
 
 -- STEP 5: Create the user profile trigger function.
 -- This function automatically creates a profile when a new user signs up in `auth.users`.
+-- FINAL FIX: This function is now robust and handles manual user creation from the Supabase dashboard.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -144,9 +145,13 @@ BEGIN
   VALUES (
     new.id,
     new.email,
-    COALESCE(new.raw_user_meta_data->>'name', SPLIT_PART(new.email, '@', 1)), -- Use name from metadata, or generate from email
-    (new.raw_user_meta_data->>'role')::public.user_role,
+    -- For name: use metadata if provided, otherwise generate a default from the email.
+    COALESCE(new.raw_user_meta_data->>'name', SPLIT_PART(new.email, '@', 1)),
+    -- For role: use metadata if provided, otherwise default to 'PLAYER'.
+    COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'::public.user_role),
+    -- For agent_id: use metadata if provided, otherwise NULL.
     (new.raw_user_meta_data->>'agent_id')::uuid,
+    -- For master_agent_id: determine from the agent_id in metadata if provided.
     (SELECT master_agent_id FROM public.profiles WHERE id = (new.raw_user_meta_data->>'agent_id')::uuid)
   );
   RETURN new;
