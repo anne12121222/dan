@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 // FIX: Widen type to handle all possible fight outcomes.
 import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner } from '../types';
@@ -22,7 +23,8 @@ interface OperatorViewProps {
   allUsers: { [id: string]: AllUserTypes };
   onStartNextFight: () => void;
   onCloseBetting: () => void;
-  onDeclareWinner: (winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED') => void;
+  // FIX: Widen type to handle all possible fight outcomes.
+  onDeclareWinner: (winner: FightWinner) => void;
   onAddUpcomingFight: (red: string, white: string) => Promise<string | null>;
 }
 

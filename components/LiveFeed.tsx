@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 // FIX: Widen type to handle all possible fight outcomes.
 import { FightStatus, FightWinner } from '../types';

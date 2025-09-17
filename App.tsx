@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { Session } from '@supabase/supabase-js';
@@ -9,12 +10,16 @@ import {
 } from './types';
 import AuthView from './components/AuthView';
 import Header from './components/Header';
+// FIX: Corrected import path for PlayerView.
 import PlayerView from './components/PlayerView';
 import OperatorView from './components/OperatorView';
+// FIX: Corrected import path for MasterAgentView.
 import MasterAgentView from './components/MasterAgentView';
+// FIX: Corrected import path for AgentView.
 import AgentView from './components/AgentView';
 import ChatModal from './components/ChatModal';
 import NotificationComponent from './components/Notification';
+// FIX: Corrected import path for ChangePasswordModal.
 import ChangePasswordModal from './components/ChangePasswordModal';
 
 const BETTING_TIMER_SECONDS = 60;

@@ -1,5 +1,7 @@
+
+// FIX: Replaced placeholder content with the full component code and adjusted import paths.
 import React from 'react';
-import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner } from '../types';
+import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner } from './types';
 import LiveFeed from './components/LiveFeed';
 import WinnerDeclaration from './components/WinnerDeclaration';
 import CompletedFightsList from './components/CompletedFightsList';
@@ -19,7 +21,7 @@ interface OperatorViewProps {
   allUsers: { [id: string]: AllUserTypes };
   onStartNextFight: () => void;
   onCloseBetting: () => void;
-  onDeclareWinner: (winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED') => void;
+  onDeclareWinner: (winner: FightWinner) => void;
   onAddUpcomingFight: (red: string, white: string) => Promise<string | null>;
 }
 

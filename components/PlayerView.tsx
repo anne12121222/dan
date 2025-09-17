@@ -1,6 +1,4 @@
-
 import React, { useState } from 'react';
-// FIX: Widen type to handle all possible fight outcomes.
 import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet, FightWinner } from '../types';
 import LiveFeed from './LiveFeed';
 import BettingControls from './BettingControls';
@@ -13,7 +11,6 @@ import RequestCoinsModal from './RequestCoinsModal';
 interface PlayerViewProps {
   currentUser: Player;
   fightStatus: FightStatus;
-  // FIX: Widen type to handle all possible fight outcomes.
   lastWinner: FightWinner | null;
   fightId: number;
   timer: number;
@@ -60,7 +57,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           <BettingPools pools={pools} />
           <button
             onClick={() => setIsRequestModalOpen(true)}
-            className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-lg transition duration-300"
+            className="w-full p-3 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition duration-300"
            >
                 Request Coins from Agent
            </button>

@@ -10,6 +10,21 @@ interface CompletedFightsListProps {
 
 const CompletedFightsList: React.FC<CompletedFightsListProps> = ({ fights, currentUserRole }) => {
   const canViewCommission = currentUserRole === UserRole.MASTER_AGENT || currentUserRole === UserRole.OPERATOR;
+
+  const getWinnerClass = (winner: FightResult['winner']) => {
+    switch(winner) {
+        case 'RED': return 'bg-red-500/20 text-red-400';
+        case 'WHITE': return 'bg-gray-200/20 text-gray-200';
+        case 'DRAW': return 'bg-yellow-500/20 text-yellow-400';
+        case 'CANCELLED': return 'bg-gray-500/20 text-gray-400';
+        default: return '';
+    }
+  }
+  const getWinnerText = (winner: FightResult['winner']) => {
+      if (winner === 'DRAW' || winner === 'CANCELLED') return winner;
+      if (winner) return `${winner} WINS`;
+      return 'N/A';
+  }
   
   return (
     <Card>
@@ -30,13 +45,9 @@ const CompletedFightsList: React.FC<CompletedFightsListProps> = ({ fights, curre
                         )}
                     </div>
                     <span
-                    className={`px-2 py-0.5 text-xs font-bold rounded ${
-                        fight.winner === 'RED'
-                        ? 'bg-red-500/20 text-red-400'
-                        : 'bg-gray-200/20 text-gray-200'
-                    }`}
+                    className={`px-2 py-0.5 text-xs font-bold rounded ${getWinnerClass(fight.winner)}`}
                     >
-                    {fight.winner} WINS
+                    {getWinnerText(fight.winner)}
                     </span>
                 </div>
               </li>

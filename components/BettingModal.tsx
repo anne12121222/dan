@@ -14,69 +14,65 @@ const BettingModal: React.FC<BettingModalProps> = ({ choice, balance, onClose, o
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const numericAmount = parseInt(amount, 10);
-
-  const handlePlaceBet = async () => {
-    if (isNaN(numericAmount) || numericAmount <= 0) {
-      setError("Please enter a valid amount.");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const betAmount = parseInt(amount, 10);
+    if (isNaN(betAmount) || betAmount <= 0) {
+      setError('Please enter a valid amount.');
       return;
     }
-    if (numericAmount > balance) {
-      setError("You do not have enough balance for this bet.");
+    if (betAmount > balance) {
+      setError('Insufficient balance.');
       return;
     }
-    
-    setError(null);
     setLoading(true);
-    const result = await onPlaceBet(numericAmount, choice);
-    setLoading(false);
-
+    setError(null);
+    const result = await onPlaceBet(betAmount, choice);
     if (result) {
       setError(result);
+      setLoading(false);
     } else {
       onClose();
     }
   };
 
-  const choiceColor = choice === 'RED' ? 'text-red-400' : 'text-gray-200';
-  const choiceBorderColor = choice === 'RED' ? 'border-red-500' : 'border-gray-400';
-  const choiceRingColor = choice === 'RED' ? 'focus:ring-red-500' : 'focus:ring-gray-300';
+  const choiceColor = choice === 'RED' ? 'text-red-500' : 'text-gray-200';
+  const buttonColor = choice === 'RED' ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-200 hover:bg-gray-300 text-zinc-900';
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className={`bg-zinc-800 rounded-lg shadow-2xl border ${choiceBorderColor} w-full max-w-sm`}>
+      <div className="bg-zinc-800 rounded-lg shadow-2xl border border-zinc-700 w-full max-w-sm">
         <div className="p-4 border-b border-zinc-700 flex justify-between items-center">
-          <h3 className="text-lg font-bold">Place Bet on <span className={choiceColor}>{choice}</span></h3>
+          <h3 className={`text-lg font-bold ${choiceColor}`}>Place Bet on {choice}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
             <XMarkIcon className="w-6 h-6" />
           </button>
         </div>
-        <div className="p-6 space-y-4">
-          {error && <p className="text-red-400 text-center text-sm p-2 bg-red-900/50 rounded-md">{error}</p>}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label htmlFor="bet-amount" className="block text-sm font-medium text-gray-400 mb-1">Bet Amount</label>
+            <label htmlFor="amount" className="block text-sm font-medium text-gray-400">
+              Bet Amount (Your Balance: {balance.toLocaleString()})
+            </label>
             <input
-              id="bet-amount"
+              id="amount"
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="0"
-              className={`w-full bg-zinc-700 text-white p-3 rounded border border-zinc-600 focus:ring-2 ${choiceRingColor} focus:outline-none transition text-2xl font-bold text-center`}
+              className="mt-1 w-full bg-zinc-700 text-white p-3 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition text-xl"
               autoFocus
               min="1"
+              max={balance}
             />
           </div>
-          <p className="text-sm text-gray-400 text-center">Your balance: {balance.toLocaleString()}</p>
-        </div>
-        <div className="p-4 bg-zinc-900/50 rounded-b-lg">
+          {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
-            onClick={handlePlaceBet}
-            disabled={loading || !amount || numericAmount <= 0}
-            className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition duration-300 disabled:bg-blue-800/50 disabled:cursor-not-allowed"
+            type="submit"
+            disabled={loading}
+            className={`w-full p-3 font-bold rounded-lg transition ${buttonColor} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
-            {loading ? 'Placing Bet...' : 'Confirm Bet'}
+            {loading ? 'Placing Bet...' : `Confirm Bet on ${choice}`}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

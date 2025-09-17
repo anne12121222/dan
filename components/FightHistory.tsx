@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlayerFightHistoryEntry } from '../types';
+import { PlayerFightHistoryEntry, FightResult } from '../types';
 import { ChevronDownIcon } from './common/Icons';
 
 interface FightHistoryProps {
@@ -8,6 +8,22 @@ interface FightHistoryProps {
 
 const FightHistory: React.FC<FightHistoryProps> = ({ fightHistory }) => {
     const [isOpen, setIsOpen] = useState(false);
+
+    const getWinnerClass = (winner: FightResult['winner']) => {
+        switch(winner) {
+            case 'RED': return 'bg-red-500/20 text-red-400';
+            case 'WHITE': return 'bg-gray-200/20 text-gray-200';
+            case 'DRAW': return 'bg-yellow-500/20 text-yellow-400';
+            case 'CANCELLED': return 'bg-gray-500/20 text-gray-400';
+            default: return '';
+        }
+    }
+    const getWinnerText = (winner: FightResult['winner']) => {
+        if (winner === 'DRAW' || winner === 'CANCELLED') return winner;
+        if (winner) return `${winner} WINS`;
+        return 'N/A';
+    }
+
 
   return (
     <div className="bg-zinc-800/50 rounded-md mt-4">
@@ -29,13 +45,9 @@ const FightHistory: React.FC<FightHistoryProps> = ({ fightHistory }) => {
                     <div className="flex justify-between items-center">
                       <span className="font-semibold text-gray-400">Fight #{result.id}</span>
                       <span
-                        className={`px-2 py-0.5 font-bold rounded ${
-                          result.winner === 'RED'
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-gray-200/20 text-gray-200'
-                        }`}
+                        className={`px-2 py-0.5 font-bold rounded ${getWinnerClass(result.winner)}`}
                       >
-                        {result.winner} Wins
+                        {getWinnerText(result.winner)}
                       </span>
                     </div>
                     {result.bet && (
@@ -48,7 +60,11 @@ const FightHistory: React.FC<FightHistoryProps> = ({ fightHistory }) => {
                                  <p className="text-red-400">
                                     <span className="font-bold">LOSS</span> (Bet: {result.bet.amount.toLocaleString()} on {result.bet.choice})
                                 </p>
-                            ) : null}
+                            ) : result.outcome === 'REFUND' ? (
+                                <p className="text-yellow-400">
+                                   <span className="font-bold">REFUND</span> (Bet: {result.bet.amount.toLocaleString()} on {result.bet.choice})
+                               </p>
+                           ) : null}
                         </div>
                     )}
                   </li>

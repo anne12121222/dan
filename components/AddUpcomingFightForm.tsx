@@ -9,25 +9,19 @@ interface AddUpcomingFightFormProps {
 const AddUpcomingFightForm: React.FC<AddUpcomingFightFormProps> = ({ onAddFight }) => {
   const [red, setRed] = useState('');
   const [white, setWhite] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleAddFight = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!red.trim() || !white.trim()) {
-        setError("Both participant names are required.");
-        return;
-    }
-    setError(null);
     setLoading(true);
-
+    setError(null);
     const result = await onAddFight(red, white);
     if (result) {
-        setError(result);
+      setError(result);
     } else {
-        // Clear form on success
-        setRed('');
-        setWhite('');
+      setRed('');
+      setWhite('');
     }
     setLoading(false);
   };
@@ -38,45 +32,19 @@ const AddUpcomingFightForm: React.FC<AddUpcomingFightFormProps> = ({ onAddFight 
         <PlusCircleIcon className="w-6 h-6 text-gray-400" />
         <h3 className="text-lg font-semibold text-gray-200">Add Upcoming Fight</h3>
       </div>
-      <form onSubmit={handleAddFight}>
-        <div className="p-4 space-y-4">
-          {error && <p className="text-red-400 text-center text-sm">{error}</p>}
-          <div>
-            <label htmlFor="red-participant" className="block text-sm font-medium text-red-400 mb-1">RED Participant</label>
-            <input
-              id="red-participant"
-              type="text"
-              value={red}
-              onChange={(e) => setRed(e.target.value)}
-              placeholder="e.g., 'Thunder'"
-              required
-              className="w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition"
-              disabled={loading}
-            />
-          </div>
-          <div>
-            <label htmlFor="white-participant" className="block text-sm font-medium text-gray-300 mb-1">WHITE Participant</label>
-            <input
-              id="white-participant"
-              type="text"
-              value={white}
-              onChange={(e) => setWhite(e.target.value)}
-              placeholder="e.g., 'Lightning'"
-              required
-              className="w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              disabled={loading}
-            />
-          </div>
+      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+        {error && <p className="text-red-400 bg-red-900/50 p-2 rounded text-sm">{error}</p>}
+        <div>
+          <label htmlFor="red" className="block text-sm font-medium text-red-400">RED Participant</label>
+          <input id="red" type="text" value={red} onChange={(e) => setRed(e.target.value)} required className="mt-1 w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition" />
         </div>
-        <div className="p-4 bg-zinc-900/50 rounded-b-lg">
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition duration-300 disabled:bg-blue-800/50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Adding...' : 'Add Fight to Queue'}
-          </button>
+        <div>
+          <label htmlFor="white" className="block text-sm font-medium text-gray-300">WHITE Participant</label>
+          <input id="white" type="text" value={white} onChange={(e) => setWhite(e.target.value)} required className="mt-1 w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition" />
         </div>
+        <button type="submit" disabled={loading} className="w-full p-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition disabled:bg-red-800/50">
+          {loading ? 'Adding...' : 'Add to Queue'}
+        </button>
       </form>
     </Card>
   );
