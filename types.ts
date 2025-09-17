@@ -54,6 +54,8 @@ export interface Bet {
 
 export interface FightResult {
   id: number;
+  // FIX: Add status property to align with database schema and fix type errors.
+  status: FightStatus;
   winner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
   participants: { red: string; white: string };
   commission: number;

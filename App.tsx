@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
@@ -25,7 +26,8 @@ const App: React.FC = () => {
   // Fight State
   const [fightStatus, setFightStatus] = useState<FightStatus>(FightStatus.SETTLED);
   const [fightId, setFightId] = useState(0);
-  const [lastWinner, setLastWinner] = useState<'RED' | 'WHITE' | null>(null);
+  // FIX: Widen type to handle all possible fight outcomes (DRAW, CANCELLED).
+  const [lastWinner, setLastWinner] = useState<'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null>(null);
   const [timer, setTimer] = useState(60);
   const [fightHistory, setFightHistory] = useState<FightResult[]>([]);
   const [upcomingFights, setUpcomingFights] = useState<UpcomingFight[]>([]);
