@@ -286,7 +286,7 @@ export interface Database {
           amount: number
           from_user_id: string | null
           id: string
-          timestamp: string
+          transaction_timestamp: string
           to_user_id: string | null
           type:
             | "TRANSFER"

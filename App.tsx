@@ -94,7 +94,7 @@ const App: React.FC = () => {
         // Agent/MA specific data
         if (user.role === UserRole.AGENT || user.role === UserRole.MASTER_AGENT) {
             const { data: txData } = await supabase.rpc('get_transactions_for_user');
-            if (txData) setTransactions(txData.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp })));
+            if (txData) setTransactions(txData.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.transaction_timestamp })));
 
             const { data: crData } = await supabase.rpc('get_coin_requests_for_user');
             if(crData) setCoinRequests(crData.map(cr => ({ id: cr.id, fromUserId: cr.from_user_id, toUserId: cr.to_user_id, amount: cr.amount, status: cr.status, createdAt: cr.created_at })));
@@ -248,7 +248,7 @@ const App: React.FC = () => {
         const transactionChannel = supabase.channel('transaction-updates').on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
             if (currentUser.role === UserRole.AGENT || currentUser.role === UserRole.MASTER_AGENT) {
                 supabase.rpc('get_transactions_for_user').then(({data}) => {
-                    if(data) setTransactions(data.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.timestamp })));
+                    if(data) setTransactions(data.map(tx => ({ id: tx.id, from: tx.from_user_id || 'MINT', to: tx.to_user_id || '', amount: tx.amount, type: tx.type, timestamp: tx.transaction_timestamp })));
                 });
             }
         }).subscribe();
