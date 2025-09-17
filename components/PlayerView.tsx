@@ -1,7 +1,7 @@
 
-
 import React, { useState } from 'react';
-import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet } from '../types';
+// FIX: Widen type to handle all possible fight outcomes.
+import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet, FightWinner } from '../types';
 import LiveFeed from './LiveFeed';
 import BettingControls from './BettingControls';
 import BettingPools from './BettingPools';
@@ -14,7 +14,7 @@ interface PlayerViewProps {
   currentUser: Player;
   fightStatus: FightStatus;
   // FIX: Widen type to handle all possible fight outcomes.
-  lastWinner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
+  lastWinner: FightWinner | null;
   fightId: number;
   timer: number;
   pools: { meron: number; wala: number };

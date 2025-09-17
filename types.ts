@@ -79,7 +79,8 @@ export interface Transaction {
     from: string; // user ID or 'MINT'
     to: string; // user ID
     amount: number;
-    type: 'TRANSFER' | 'COMMISSION' | 'MINT';
+    // FIX: Widen transaction type to include all possibilities from the database.
+    type: 'TRANSFER' | 'COMMISSION' | 'MINT' | 'BET_WIN' | 'BET_PLACE' | 'BET_REFUND';
     timestamp: string;
 }
 

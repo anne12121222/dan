@@ -1,7 +1,7 @@
 
-
 import React from 'react';
-import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes } from '../types';
+// FIX: Widen type to handle all possible fight outcomes.
+import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner } from '../types';
 import LiveFeed from './LiveFeed';
 import WinnerDeclaration from './WinnerDeclaration';
 import CompletedFightsList from './CompletedFightsList';
@@ -13,7 +13,7 @@ interface OperatorViewProps {
   currentUser: Operator;
   fightStatus: FightStatus;
   // FIX: Widen type to handle all possible fight outcomes.
-  lastWinner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
+  lastWinner: FightWinner | null;
   fightId: number;
   timer: number;
   fightHistory: FightResult[];

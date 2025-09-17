@@ -1,11 +1,13 @@
+
 import React from 'react';
-import { FightStatus } from '../types';
+// FIX: Widen type to handle all possible fight outcomes.
+import { FightStatus, FightWinner } from '../types';
 import FightInfoBar from './FightInfoBar';
 
 interface LiveFeedProps {
   fightStatus: FightStatus;
   // FIX: Widen type to handle all possible fight outcomes.
-  lastWinner: 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED' | null;
+  lastWinner: FightWinner | null;
   fightId: number;
   timer: number;
 }
