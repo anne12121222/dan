@@ -64,6 +64,8 @@ export interface FightResult {
   commission: number;
   status: FightStatus;
   created_at: string;
+  // FIX: Add optional 'bets' property to store bet history for each fight. This resolves the error on App.tsx.
+  bets?: Bet[];
 }
 
 export interface UpcomingFight {
