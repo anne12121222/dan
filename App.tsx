@@ -41,10 +41,12 @@ const App: React.FC = () => {
     const [notification, setNotification] = useState<NotificationType | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    // FIX: Add state to hold agents for the registration form.
+    const [registerableAgents, setRegisterableAgents] = useState<Agent[]>([]);
 
-    const showNotification = (message: string, type: 'success' | 'error') => {
+    const showNotification = useCallback((message: string, type: 'success' | 'error') => {
         setNotification({ id: Date.now(), message, type });
-    };
+    }, []);
     
     const handleRpcError = (error: any, defaultMessage: string) => {
         console.error(defaultMessage, error);
@@ -132,13 +134,48 @@ const App: React.FC = () => {
 
     }, []);
 
+    // FIX: New useEffect to fetch agents for the registration form on initial load.
     useEffect(() => {
-        if (!isSupabaseConfigured) return;
+        const fetchAgentsForRegistration = async () => {
+            if (!isSupabaseConfigured || !supabase) return;
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('role', UserRole.AGENT);
+
+            if (error) {
+                console.error("Error fetching agents for registration:", error);
+            } else if (data) {
+                setRegisterableAgents(data.map(mapProfileToUserType) as Agent[]);
+            }
+        };
+        fetchAgentsForRegistration();
+    }, []);
+
+    // FIX: Overhauled authentication handling to be more robust.
+    useEffect(() => {
+        if (!isSupabaseConfigured || !supabase) return;
 
         const handleAuthChange = async (session: any) => {
              if (session?.user) {
-                await refreshAllData(session.user.id);
+                // First, verify the profile exists to prevent getting stuck.
+                // This can happen if a user is in auth.users but not public.profiles (e.g., manual creation).
+                const { data: profile, error } = await supabase
+                    .from('profiles')
+                    .select('id')
+                    .eq('id', session.user.id)
+                    .single();
+
+                if (error || !profile) {
+                    console.error("Login failed: Could not find a user profile for the authenticated user.", error);
+                    showNotification("Login failed: Your user profile could not be loaded. Please contact support.", 'error');
+                    await supabase.auth.signOut(); // Force logout to prevent inconsistent state
+                } else {
+                    // Profile exists, proceed to load all application data.
+                    await refreshAllData(session.user.id);
+                }
             } else {
+                // No session or logout event
                 setCurrentUser(null);
                 setAllUsers({});
             }
@@ -146,8 +183,9 @@ const App: React.FC = () => {
 
         supabase.auth.getSession().then(({ data: { session } }) => handleAuthChange(session));
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => handleAuthChange(session));
+        
         return () => subscription.unsubscribe();
-    }, [refreshAllData]);
+    }, [refreshAllData, showNotification]);
 
 
     useEffect(() => {
@@ -172,7 +210,7 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured) return "Supabase is not configured.";
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) return error.message;
-        showNotification(`Welcome back!`, 'success');
+        // The onAuthStateChange listener will handle the rest.
         return null;
     };
     
@@ -206,7 +244,7 @@ const App: React.FC = () => {
         const { error } = await supabase.rpc('close_betting', { p_fight_id: fightId });
         if(error) handleRpcError(error, "Failed to close betting.");
         else showNotification('Betting is now closed.', 'success');
-    }, [supabase, fightId]);
+    }, [fightId]);
 
     useEffect(() => {
         // FIX: Use ReturnType<typeof setInterval> for browser compatibility instead of NodeJS.Timeout.
@@ -351,7 +389,7 @@ const App: React.FC = () => {
     
     if (!currentUser) {
         return <AuthView onLogin={handleLogin} onRegister={handleRegister} isSupabaseConfigured={isSupabaseConfigured}
-            agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT) as Agent[]}
+            agents={registerableAgents}
         />;
     }
 
