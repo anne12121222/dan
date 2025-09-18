@@ -149,7 +149,7 @@ const App: React.FC = () => {
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
             if (!isSupabaseConfigured || !supabase) return;
-            // Fetch agents using the new secure RPC function
+            // Fetch agents from the new secure RPC function
             const { data, error } = await supabase.rpc('get_registerable_agents');
 
             if (error) {

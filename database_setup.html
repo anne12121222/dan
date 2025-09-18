@@ -1,9 +1,9 @@
 -- Grand Overhaul: Final, Definitive, and 100% Complete Database Script
 -- This script is fully resettable and contains all backend logic for every feature.
--- Replaced the public table/trigger with a SECURITY DEFINER function to definitively fix recursion errors.
+-- Replaced the public table/trigger pattern with a SECURITY DEFINER function to definitively fix all recursion/permission errors.
 
 -- STEP 1: Clean up old objects to ensure a clean slate.
-DROP FUNCTION IF EXISTS public.sync_public_profile() CASCADE;
+DROP FUNCTION IF EXISTS public.sync_public_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
@@ -26,7 +26,7 @@ DROP TABLE IF EXISTS public.fights CASCADE;
 DROP TABLE IF EXISTS public.messages CASCADE;
 DROP TABLE IF EXISTS public.transactions CASCADE;
 DROP TABLE IF EXISTS public.upcoming_fights CASCADE;
-DROP TABLE IF EXISTS public.public_profiles CASCADE; -- removing this table
+DROP TABLE IF EXISTS public.public_agents CASCADE; -- Remove obsolete table
 DROP TABLE IF EXISTS public.profiles CASCADE;
 
 DROP TYPE IF EXISTS public.user_role CASCADE;
@@ -58,8 +58,6 @@ CREATE TABLE public.profiles (
     master_agent_id uuid REFERENCES public.profiles(id)
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- RLS policies rewritten with subqueries to be non-recursive and clear to the query planner.
 CREATE POLICY "Authenticated users can see their own profile." ON public.profiles FOR SELECT TO authenticated USING (id = auth.uid());
 CREATE POLICY "Agents and Master Agents can see their subordinates." ON public.profiles FOR SELECT TO authenticated USING (agent_id = auth.uid() OR master_agent_id = auth.uid());
 CREATE POLICY "Users can see their superiors." ON public.profiles FOR SELECT TO authenticated USING (
@@ -175,6 +173,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+
 -- STEP 6: Create triggers.
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -183,17 +182,14 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 
 -- STEP 7: Create database functions (RPC).
 
--- NEW: Function for anonymous users to get a list of agents for registration.
--- This definitively fixes the recursion error by using SECURITY DEFINER.
+-- NEW: Definitive function to get agents for registration, avoiding all RLS recursion issues.
 CREATE OR REPLACE FUNCTION public.get_registerable_agents()
 RETURNS TABLE(id uuid, name text) AS $$
 BEGIN
-    -- This function runs with the permissions of its owner, bypassing the RLS
-    -- of the anonymous user calling it. It securely exposes only the needed data.
-    RETURN QUERY
-    SELECT p.id, p.name FROM public.profiles p WHERE p.role = 'AGENT'::public.user_role;
+  RETURN QUERY
+    SELECT p.id, p.name FROM public.profiles p WHERE p.role = 'AGENT';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 
 -- Function for an Operator to create a new Master Agent user
@@ -487,13 +483,14 @@ $$ LANGUAGE plpgsql;
 
 
 -- STEP 8: Enable real-time for tables.
+-- Note: public_agents is removed as it no longer exists.
 ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles, public.fights, public.bets, public.transactions, public.messages, public.coin_requests, public.upcoming_fights;
 
 -- STEP 9: Grant necessary, minimal permissions.
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 
--- Grant access for anonymous users ONLY to the new safe function
-GRANT EXECUTE ON FUNCTION public.get_registerable_agents() TO anon, authenticated;
+-- Grant access for anonymous users ONLY to the new safe RPC function
+GRANT EXECUTE ON FUNCTION public.get_registerable_agents() TO anon;
 
 -- Grant access for authenticated users
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;

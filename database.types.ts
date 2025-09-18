@@ -299,12 +299,12 @@ export interface Database {
         }[]
       }
       get_registerable_agents: {
-        Args: Record<PropertyKey, never>
+        Args: Record<PropertyKey, never>;
         Returns: {
-          id: string
-          name: string
-        }[]
-      }
+          id: string;
+          name: string;
+        }[];
+      };
       get_transactions_for_user: {
         Args: Record<PropertyKey, never>
         Returns: {
