@@ -68,11 +68,9 @@ const App: React.FC = () => {
         return user;
     };
     
-    const refreshAllData = useCallback(async (userIdToRefresh?: string) => {
+    const refreshAllData = useCallback(async () => {
         if (!supabase) return;
-        const currentUserId = userIdToRefresh || currentUser?.id;
-        if (!currentUserId) return;
-
+        
         // Fetch all users/profiles
         const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*');
         if (profilesError) console.error("Error fetching profiles:", profilesError);
@@ -82,8 +80,9 @@ const App: React.FC = () => {
                 return acc;
             }, {} as { [id: string]: AllUserTypes });
             setAllUsers(usersMap);
-            if (usersMap[currentUserId]) {
-                setCurrentUser(usersMap[currentUserId]);
+            // Also refresh current user's data from the new map
+             if (currentUser && usersMap[currentUser.id]) {
+                setCurrentUser(usersMap[currentUser.id]);
             }
         }
         
@@ -137,7 +136,7 @@ const App: React.FC = () => {
         if(reqsError) console.error("Error fetching coin requests:", reqsError);
         else setCoinRequests(reqs);
 
-    }, [currentUser?.id]);
+    }, [currentUser]);
 
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
@@ -148,7 +147,7 @@ const App: React.FC = () => {
                 .eq('role', UserRole.AGENT);
 
             if (error) {
-                console.error("Error fetching agents for registration:", error);
+                console.error("Error fetching agents for registration:", error.message || error);
             } else if (data) {
                 setRegisterableAgents(data.map(mapProfileToUserType) as Agent[]);
             }
@@ -156,6 +155,7 @@ const App: React.FC = () => {
         fetchAgentsForRegistration();
     }, []);
 
+    // Effect for handling authentication state changes
     useEffect(() => {
         if (!isSupabaseConfigured || !supabase) {
             setIsLoading(false);
@@ -171,27 +171,34 @@ const App: React.FC = () => {
                     .single();
 
                 if (error || !profile) {
-                    console.error("Login failed: Could not find a user profile for the authenticated user.", error);
+                    console.error("Login failed: Could not find a user profile.", error);
                     showNotification("Login failed: Your user profile could not be loaded.", 'error');
                     await supabase.auth.signOut();
                     setCurrentUser(null);
                 } else {
                     setCurrentUser(mapProfileToUserType(profile));
-                    await refreshAllData(profile.id); // Load all other data
                 }
             } else {
                 setCurrentUser(null);
                 setAllUsers({});
             }
-            setIsLoading(false);
+            setIsLoading(false); // Authentication check is complete, render the app
         };
 
         supabase.auth.getSession().then(({ data: { session } }) => handleAuthChange(session));
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => handleAuthChange(session));
         
         return () => subscription.unsubscribe();
-    }, [refreshAllData, showNotification]);
+    }, [showNotification]);
 
+    // Effect for fetching data after a user has been authenticated
+    useEffect(() => {
+        if (currentUser) {
+            refreshAllData();
+        }
+    }, [currentUser, refreshAllData]);
+
+    // Effect for setting up real-time subscriptions
     useEffect(() => {
         if (!supabase || !currentUser) {
             if (realtimeChannel.current) {
@@ -206,7 +213,7 @@ const App: React.FC = () => {
         realtimeChannel.current = supabase.channel('realtime-all')
             .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
                 console.log('Realtime change received!', payload);
-                refreshAllData(currentUser.id);
+                refreshAllData();
             })
             .subscribe();
 
@@ -345,6 +352,7 @@ const App: React.FC = () => {
 
     const renderUserView = () => {
         if (!currentUser) {
+            // This case should ideally not be hit if a user is logged in, but serves as a fallback.
             return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
         }
 

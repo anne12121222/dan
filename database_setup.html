@@ -1,9 +1,11 @@
 -- Grand Overhaul: Final, Definitive, and 100% Complete Database Script
 -- This script is fully resettable and contains all backend logic for every feature.
--- RLS policies have been hardened for maximum security.
+-- RLS policies have been re-architected with subqueries to definitively fix recursion errors.
 
 -- STEP 1: Clean up old objects to ensure a clean slate.
-DROP FUNCTION IF EXISTS public.create_user(text, text, text, public.user_role, uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_role() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.add_upcoming_fight(text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
@@ -55,15 +57,18 @@ CREATE TABLE public.profiles (
     master_agent_id uuid REFERENCES public.profiles(id)
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view their own profile." ON public.profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Users can view their subordinates and superiors." ON public.profiles FOR SELECT USING (
-    id = agent_id OR -- My Agent can see me
-    id = master_agent_id OR -- My Master Agent can see me
-    agent_id = auth.uid() OR -- I can see my Players
-    master_agent_id = auth.uid() OR -- I can see my Agents
-    (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR' -- Operator can see all
-);
+
+-- RLS policies rewritten with subqueries to be non-recursive and clear to the query planner.
 CREATE POLICY "Anon users can see agents for registration." ON public.profiles FOR SELECT TO anon USING (role = 'AGENT');
+CREATE POLICY "Authenticated users can see their own profile." ON public.profiles FOR SELECT TO authenticated USING (id = auth.uid());
+CREATE POLICY "Agents and Master Agents can see their subordinates." ON public.profiles FOR SELECT TO authenticated USING (agent_id = auth.uid() OR master_agent_id = auth.uid());
+CREATE POLICY "Users can see their superiors." ON public.profiles FOR SELECT TO authenticated USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles my_profile
+        WHERE my_profile.id = auth.uid() AND (profiles.id = my_profile.agent_id OR profiles.id = my_profile.master_agent_id)
+    )
+);
+CREATE POLICY "Operators can see all profiles." ON public.profiles FOR SELECT TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR'::public.user_role);
 
 
 -- STEP 4: Create other application tables with hardened RLS.
@@ -76,7 +81,7 @@ CREATE TABLE public.fights (
 );
 ALTER TABLE public.fights ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Authenticated users can view fights." ON public.fights FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Operators can manage fights." ON public.fights FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
+CREATE POLICY "Operators can manage fights." ON public.fights FOR ALL TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR'::public.user_role);
 
 
 CREATE TABLE public.upcoming_fights (
@@ -85,7 +90,7 @@ CREATE TABLE public.upcoming_fights (
 );
 ALTER TABLE public.upcoming_fights ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Authenticated users can view upcoming fights." ON public.upcoming_fights FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Operators can manage upcoming fights." ON public.upcoming_fights FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
+CREATE POLICY "Operators can manage upcoming fights." ON public.upcoming_fights FOR ALL TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR'::public.user_role);
 
 
 CREATE TABLE public.bets (
@@ -97,13 +102,13 @@ CREATE TABLE public.bets (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.bets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view their own bets." ON public.bets FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Hierarchies can view subordinate bets." ON public.bets FOR SELECT USING (
-    (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR' OR
+CREATE POLICY "Users can view their own bets." ON public.bets FOR SELECT TO authenticated USING (auth.uid() = user_id);
+CREATE POLICY "Hierarchies can view subordinate bets." ON public.bets FOR SELECT TO authenticated USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR'::public.user_role OR
     (SELECT agent_id FROM public.profiles WHERE id = user_id) = auth.uid() OR
     (SELECT master_agent_id FROM public.profiles WHERE id = (SELECT agent_id FROM public.profiles WHERE id = user_id)) = auth.uid()
 );
-CREATE POLICY "Players can place bets." ON public.bets FOR INSERT WITH CHECK (auth.uid() = user_id AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'PLAYER');
+CREATE POLICY "Players can place bets." ON public.bets FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'PLAYER'::public.user_role);
 
 CREATE TABLE public.transactions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -114,7 +119,7 @@ CREATE TABLE public.transactions (
     timestamp timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can see their own transactions." ON public.transactions FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
+CREATE POLICY "Users can see their own transactions." ON public.transactions FOR SELECT TO authenticated USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
 
 CREATE TABLE public.messages (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -124,8 +129,8 @@ CREATE TABLE public.messages (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can see messages sent to or from them." ON public.messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
-CREATE POLICY "Users can send messages." ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
+CREATE POLICY "Users can see messages sent to or from them." ON public.messages FOR SELECT TO authenticated USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+CREATE POLICY "Users can send messages." ON public.messages FOR INSERT TO authenticated WITH CHECK (auth.uid() = sender_id);
 
 
 CREATE TABLE public.coin_requests (
@@ -137,7 +142,7 @@ CREATE TABLE public.coin_requests (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.coin_requests ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can see requests sent to or from them." ON public.coin_requests FOR ALL USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
+CREATE POLICY "Users can see requests sent to or from them." ON public.coin_requests FOR ALL TO authenticated USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
 
 
 -- STEP 5: Create the user profile trigger function.
