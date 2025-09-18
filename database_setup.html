@@ -41,9 +41,10 @@ DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_user_view_data() CASCADE;
--- FIX: Drop new internal functions if they exist from a partial run
+-- FIX: Drop old internal helper functions to replace them with the new architecture.
 DROP FUNCTION IF EXISTS public.internal_transfer_coins(uuid, uuid, numeric) CASCADE;
 DROP FUNCTION IF EXISTS public.internal_set_master_agent(uuid, uuid) CASCADE;
+DROP FUNCTION IF EXISTS public._approve_coin_request_unsafe(uuid, uuid, uuid, numeric) CASCADE;
 
 
 -- 2. TYPES: Define custom data types
@@ -64,8 +65,10 @@ CREATE TABLE public.profiles (
   commission_balance numeric NOT NULL DEFAULT 0,
   commission_rate numeric NOT NULL DEFAULT 0.07, -- 7% default
   transfer_fee numeric NOT NULL DEFAULT 0.01, -- 1% default
-  agent_id uuid REFERENCES public.profiles(id),
-  master_agent_id uuid REFERENCES public.profiles(id),
+  -- FIX: Remove foreign key constraints to solve RLS issues during user creation.
+  -- Integrity will be checked procedurally in the handle_new_user trigger.
+  agent_id uuid,
+  master_agent_id uuid,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -138,7 +141,7 @@ USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
 WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
 
--- Replace complex, recursive RLS with a simple policy. Data access is now handled by secure RPC functions.
+-- A simple policy is now sufficient because complex data access is handled by secure RPC functions.
 CREATE POLICY "Allow users to see and update their own profile" ON public.profiles
 FOR ALL USING (id = auth.uid())
 WITH CHECK (id = auth.uid());
@@ -158,7 +161,6 @@ CREATE POLICY "Allow users to see their own data" ON public.transactions FOR SEL
 CREATE POLICY "Allow users to create their own outgoing transactions" ON public.transactions FOR INSERT WITH CHECK (from_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own data" ON public.coin_requests FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
 CREATE POLICY "Allow users to create their own coin requests" ON public.coin_requests FOR INSERT WITH CHECK (from_user_id = auth.uid());
--- FIX: Add a new UPDATE policy to allow the recipient of a request to change its status. This is crucial for the new approval workflow.
 CREATE POLICY "Allow recipients to update request status" ON public.coin_requests FOR UPDATE USING (to_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT USING (sender_id = auth.uid() OR receiver_id = auth.uid());
 CREATE POLICY "Allow users to send messages as themselves" ON public.messages FOR INSERT WITH CHECK (sender_id = auth.uid());
@@ -170,21 +172,40 @@ WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR
 
 
 -- 5. TRIGGERS: Automate profile creation
+-- FIX: Re-architected this function to manually check for agent existence,
+-- which bypasses the RLS-related foreign key constraint error during user sign-up.
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_agent_id uuid;
+  v_master_agent_id uuid;
+  v_role public.user_role;
+  v_agent_exists boolean;
 BEGIN
+  v_role := COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER');
+  v_agent_id := (NEW.raw_user_meta_data->>'agent_id')::uuid;
+  v_master_agent_id := (NEW.raw_user_meta_data->>'master_agent_id')::uuid;
+
+  -- Manually verify the foreign key to bypass RLS issues with declarative constraints.
+  IF v_role = 'PLAYER' AND v_agent_id IS NOT NULL THEN
+    SELECT EXISTS(SELECT 1 FROM public.profiles WHERE id = v_agent_id AND role = 'AGENT') INTO v_agent_exists;
+    IF NOT v_agent_exists THEN
+      RAISE EXCEPTION 'Invalid agent selected during registration.';
+    END IF;
+  END IF;
+
   INSERT INTO public.profiles (id, name, email, role, agent_id, master_agent_id)
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'name', NEW.email, 'New User'),
     NEW.email,
-    COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'),
-    (NEW.raw_user_meta_data->>'agent_id')::uuid,
-    (NEW.raw_user_meta_data->>'master_agent_id')::uuid
+    v_role,
+    v_agent_id,
+    v_master_agent_id
   );
 
   -- Give new players a starting balance
-  IF COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER') = 'PLAYER' THEN
+  IF v_role = 'PLAYER' THEN
     UPDATE public.profiles SET coin_balance = 1000 WHERE id = NEW.id;
   END IF;
 
@@ -199,28 +220,30 @@ CREATE TRIGGER on_auth_user_created
 
 -- 6. RPC FUNCTIONS: Define business logic
 
--- FIX: Create internal, secure helper functions to perform privileged operations, bypassing RLS safely.
--- This function securely moves coins between any two users.
-CREATE FUNCTION internal_transfer_coins(p_from_id uuid, p_to_id uuid, p_amount numeric)
+-- FIX: Create a single, internal, secure helper function to perform all privileged operations related to coin request approval.
+-- This function runs with the owner's permissions and bypasses RLS, resolving the core bug.
+CREATE FUNCTION _approve_coin_request_unsafe(p_request_id uuid, p_responder_id uuid, p_requester_id uuid, p_amount numeric)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
+DECLARE
+  requester public.profiles;
 BEGIN
-  UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = p_from_id;
-  UPDATE public.profiles SET coin_balance = coin_balance + p_amount WHERE id = p_to_id;
-  INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (p_from_id, p_to_id, p_amount, 'TRANSFER');
-END;
-$$;
+  -- This internal function assumes all security checks were performed by its caller.
+  -- 1. Transfer coins
+  UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = p_responder_id;
+  UPDATE public.profiles SET coin_balance = coin_balance + p_amount WHERE id = p_requester_id;
+  INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (p_responder_id, p_requester_id, p_amount, 'TRANSFER');
 
--- This function securely sets the master agent for an agent.
-CREATE FUNCTION internal_set_master_agent(p_agent_id uuid, p_master_agent_id uuid)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER SET search_path = public
-AS $$
-BEGIN
-  UPDATE public.profiles SET master_agent_id = p_master_agent_id WHERE id = p_agent_id;
+  -- 2. Perform "Adoption": if an MA approves an unassigned agent, they become their MA.
+  SELECT * INTO requester FROM public.profiles WHERE id = p_requester_id;
+  IF requester.role = 'AGENT' AND requester.master_agent_id IS NULL THEN
+    UPDATE public.profiles SET master_agent_id = p_responder_id WHERE id = p_requester_id;
+  END IF;
+
+  -- 3. Update the original request status to APPROVED
+  UPDATE public.coin_requests SET status = 'APPROVED' WHERE id = p_request_id;
 END;
 $$;
 
@@ -424,8 +447,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- FIX: Re-architected this function. It's now a standard function that relies on RLS and calls the new `internal_` helper functions
--- to perform actions that require elevated privileges. This is a more robust and secure design.
+-- FIX: Re-architected this function to be a secure "gateway". It runs with the user's permissions to perform all checks,
+-- then calls the new privileged internal helper function to execute the database changes.
 CREATE FUNCTION public.respond_to_coin_request(p_request_id uuid, p_response public.request_status)
 RETURNS text 
 LANGUAGE plpgsql
@@ -436,26 +459,22 @@ DECLARE
   requesting_user_profile public.profiles;
   responder_id uuid := auth.uid();
 BEGIN
-  -- We can select freely due to RLS policies.
+  -- Fetch records using the user's permissions (enforced by RLS)
   SELECT * INTO responder_profile FROM public.profiles WHERE id = responder_id;
   SELECT * INTO request FROM public.coin_requests WHERE id = p_request_id;
   
+  -- Perform all security and business logic checks as the calling user
   IF request IS NULL THEN RETURN 'Error: Request not found.'; END IF;
   IF request.status != 'PENDING' THEN RETURN 'Error: This request has already been handled.'; END IF;
-
+  IF request.to_user_id != responder_id THEN RETURN 'Error: You are not authorized to respond to this request.'; END IF;
+  
   SELECT * INTO requesting_user_profile FROM public.profiles WHERE id = request.from_user_id;
-
-  -- AUTHORIZATION LOGIC
-  IF request.to_user_id != responder_id THEN
-    RETURN 'Error: You are not authorized to respond to this request.';
-  END IF;
-
-  IF (responder_profile.role = 'AGENT' AND requesting_user_profile.role != 'PLAYER') THEN
-    RETURN 'Error: Agents can only respond to requests from Players.';
-  END IF;
-
+  
   IF (responder_profile.role = 'MASTER_AGENT' AND requesting_user_profile.role != 'AGENT') THEN
     RETURN 'Error: Master Agents can only respond to requests from Agents.';
+  END IF;
+   IF (responder_profile.role = 'AGENT' AND requesting_user_profile.role != 'PLAYER') THEN
+    RETURN 'Error: Agents can only respond to requests from Players.';
   END IF;
 
   IF p_response = 'APPROVED' THEN
@@ -463,20 +482,13 @@ BEGIN
         RETURN 'Error: Insufficient balance to approve this request.';
     END IF;
 
-    -- Call the secure helper function to move coins.
-    PERFORM internal_transfer_coins(responder_id, request.from_user_id, request.amount);
-
-    -- "Adoption" logic: if an MA approves an unassigned agent's request, they become their MA.
-    -- This now calls the secure helper function to update another user's profile.
-    IF responder_profile.role = 'MASTER_AGENT' AND requesting_user_profile.role = 'AGENT' THEN
-      IF requesting_user_profile.master_agent_id IS NULL THEN
-        PERFORM internal_set_master_agent(request.from_user_id, responder_id);
-      END IF;
-    END IF;
+    -- If all checks pass, call the privileged internal function to perform the updates
+    PERFORM _approve_coin_request_unsafe(p_request_id, responder_id, request.from_user_id, request.amount);
+  ELSE -- Handling 'DECLINED'
+    -- The user is the recipient, so RLS allows this update directly.
+    UPDATE public.coin_requests SET status = 'DECLINED' WHERE id = p_request_id;
   END IF;
   
-  -- The RLS policy allows the recipient (responder) to update the request.
-  UPDATE public.coin_requests SET status = p_response WHERE id = p_request_id;
   RETURN NULL;
 END;
 $$;

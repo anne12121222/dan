@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet, FightWinner } from '../types';
+import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet, FightWinner, AllUserTypes, Message } from '../types';
 import LiveFeed from './LiveFeed';
 import BettingControls from './BettingControls';
 import BettingPools from './BettingPools';
@@ -8,12 +7,12 @@ import FightHistory from './FightHistory';
 import Trends from './Trends';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer';
 import RequestCoinsModal from './RequestCoinsModal';
+import ChatModal from './ChatModal';
 
 interface PlayerViewProps {
   currentUser: Player;
   fightStatus: FightStatus;
   lastWinner: FightWinner | null;
-  // FIX: Allow fightId to be null for the initial state where no fight exists.
   fightId: number | null;
   timer: number;
   pools: { meron: number; wala: number };
@@ -24,6 +23,12 @@ interface PlayerViewProps {
   onCloseDrawer: () => void;
   upcomingFights: UpcomingFight[];
   onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
+  allUsers: { [id: string]: AllUserTypes };
+  onOpenChat: (user: AllUserTypes) => void;
+  chatTargetUser: AllUserTypes | null;
+  onCloseChat: () => void;
+  onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
+  messages: { [userId: string]: Message[] };
 }
 
 const PlayerView: React.FC<PlayerViewProps> = ({
@@ -40,8 +45,21 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   onCloseDrawer,
   upcomingFights,
   onCreateCoinRequest,
+  allUsers,
+  onOpenChat,
+  chatTargetUser,
+  onCloseChat,
+  onSendMessage,
+  messages
 }) => {
     const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+    const agent = allUsers[currentUser.agentId];
+
+    const handleSendMessage = async (text: string, amount: number) => {
+        if (chatTargetUser) {
+            await onSendMessage(chatTargetUser.id, text, amount);
+        }
+    };
 
   return (
     <>
@@ -58,12 +76,22 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         </div>
         <div className="space-y-4">
           <BettingPools pools={pools} />
-          <button
-            onClick={() => setIsRequestModalOpen(true)}
-            className="w-full p-3 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition duration-300"
-           >
-                Request Coins from Agent
-           </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+                onClick={() => setIsRequestModalOpen(true)}
+                className="w-full p-3 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition duration-300"
+            >
+                Request Coins
+            </button>
+            {agent && (
+                <button
+                    onClick={() => onOpenChat(agent)}
+                    className="w-full p-3 bg-zinc-600 hover:bg-zinc-700 text-white font-bold text-sm rounded-lg transition duration-300"
+                >
+                    Chat with Agent
+                </button>
+            )}
+           </div>
           <Trends fightHistory={fightHistory} />
           <FightHistory fightHistory={fightHistory} />
         </div>
@@ -77,6 +105,15 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         <RequestCoinsModal
             onClose={() => setIsRequestModalOpen(false)}
             onSubmit={onCreateCoinRequest}
+        />
+      )}
+      {chatTargetUser && agent && chatTargetUser.id === agent.id && (
+        <ChatModal
+          currentUser={currentUser}
+          chatTargetUser={agent}
+          messages={messages[agent.id] || []}
+          onClose={onCloseChat}
+          onSendMessage={handleSendMessage}
         />
       )}
     </>

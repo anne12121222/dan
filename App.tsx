@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
@@ -427,9 +426,25 @@ const App: React.FC = () => {
                 });
                 return (
                     <PlayerView
-                        currentUser={currentUser as Player} fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} pools={pools} fightHistory={playerHistory} onPlaceBet={onPlaceBet}
+                        currentUser={currentUser as Player}
+                        fightStatus={fightStatus}
+                        lastWinner={lastWinner}
+                        fightId={fightId}
+                        timer={timer}
+                        pools={pools}
+                        fightHistory={playerHistory}
+                        onPlaceBet={onPlaceBet}
                         currentBet={currentBets.find(b => b.userId === currentUser.id && b.fightId === fightId) || null}
-                        isDrawerOpen={isDrawerOpen} onCloseDrawer={() => setIsDrawerOpen(false)} upcomingFights={upcomingFights} onCreateCoinRequest={onCreateCoinRequest}
+                        isDrawerOpen={isDrawerOpen}
+                        onCloseDrawer={() => setIsDrawerOpen(false)}
+                        upcomingFights={upcomingFights}
+                        onCreateCoinRequest={onCreateCoinRequest}
+                        allUsers={allUsers}
+                        onOpenChat={handleOpenChat}
+                        chatTargetUser={chatTargetUser}
+                        onCloseChat={() => setChatTargetUser(null)}
+                        onSendMessage={onSendMessage}
+                        messages={allMessages}
                     />
                 );
             case UserRole.AGENT:
