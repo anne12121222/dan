@@ -1,5 +1,6 @@
 
 
+
 import React from 'react';
 // FIX: Widen type to handle all possible fight outcomes.
 import { FightStatus, FightWinner } from '../types';
@@ -9,7 +10,8 @@ interface LiveFeedProps {
   fightStatus: FightStatus;
   // FIX: Widen type to handle all possible fight outcomes.
   lastWinner: FightWinner | null;
-  fightId: number;
+  // FIX: Allow fightId to be null for the initial state where no fight exists.
+  fightId: number | null;
   timer: number;
 }
 
@@ -21,7 +23,7 @@ const LiveFeed: React.FC<LiveFeedProps> = ({ fightStatus, lastWinner, fightId, t
   // 3. Replace the placeholder URL below with your actual stream URL.
   const streamUrl = 'https://stream.mux.com/A3VXy02VoUinw02KLsoMy4dp29e02bXaley.m3u8'; // Placeholder HLS stream
 
-  const showVideo = fightStatus === FightStatus.BETTING_OPEN || fightStatus === FightStatus.BETTING_CLOSED;
+  const showVideo = fightId !== null && (fightStatus === FightStatus.BETTING_OPEN || fightStatus === FightStatus.BETTING_CLOSED);
 
   return (
     <div className="bg-black rounded-lg overflow-hidden relative shadow-2xl border border-zinc-700">
@@ -66,8 +68,8 @@ const LiveFeed: React.FC<LiveFeedProps> = ({ fightStatus, lastWinner, fightId, t
         {fightStatus === FightStatus.SETTLED && !lastWinner && (
              <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
                <div className="text-center">
-                  <p className="text-gray-400 text-lg">Welcome, Operator!</p>
-                  <p className="text-gray-500 text-sm">Click "Start Next Fight" to begin the event.</p>
+                  <p className="text-gray-400 text-lg">Welcome!</p>
+                  <p className="text-gray-500 text-sm">{fightId === null ? 'Waiting for the first fight to begin.' : 'Click "Start Next Fight" to begin the event.'}</p>
               </div>
              </div>
         )}

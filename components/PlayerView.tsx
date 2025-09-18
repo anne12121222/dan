@@ -13,7 +13,8 @@ interface PlayerViewProps {
   currentUser: Player;
   fightStatus: FightStatus;
   lastWinner: FightWinner | null;
-  fightId: number;
+  // FIX: Allow fightId to be null for the initial state where no fight exists.
+  fightId: number | null;
   timer: number;
   pools: { meron: number; wala: number };
   fightHistory: PlayerFightHistoryEntry[];

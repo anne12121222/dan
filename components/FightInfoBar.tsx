@@ -1,9 +1,11 @@
+
 // Grand Overhaul: This component now displays a "CLOSING SOON" warning.
 import React from 'react';
 import { FightStatus } from '../types';
 
 interface FightInfoBarProps {
-  fightId: number;
+  // FIX: Allow fightId to be null for the initial state where no fight exists.
+  fightId: number | null;
   status: FightStatus;
   timer: number;
 }
@@ -32,7 +34,8 @@ const FightInfoBar: React.FC<FightInfoBarProps> = ({ fightId, status, timer }) =
     <div className="absolute top-0 left-0 right-0 bg-black/50 backdrop-blur-sm p-2 z-10 flex justify-between items-center text-white">
       <div className="flex items-center space-x-2">
         <span className={`px-3 py-1 text-xs font-bold rounded ${color}`}>{text}</span>
-        <span className="font-semibold text-sm">FIGHT #{fightId}</span>
+        {/* FIX: Display a placeholder if fightId is null. */}
+        <span className="font-semibold text-sm">FIGHT #{fightId ?? '---'}</span>
       </div>
       {showTimer && (
         <div className="flex items-center space-x-2 bg-zinc-800 px-3 py-1 rounded">

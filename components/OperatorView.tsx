@@ -1,5 +1,6 @@
 
 
+
 import React from 'react';
 // FIX: Widen type to handle all possible fight outcomes.
 import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner } from '../types';
@@ -15,7 +16,8 @@ interface OperatorViewProps {
   fightStatus: FightStatus;
   // FIX: Widen type to handle all possible fight outcomes.
   lastWinner: FightWinner | null;
-  fightId: number;
+  // FIX: Allow fightId to be null for the initial state where no fight exists.
+  fightId: number | null;
   timer: number;
   fightHistory: FightResult[];
   upcomingFights: UpcomingFight[];

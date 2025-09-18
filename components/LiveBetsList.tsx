@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useEffect } from 'react';
 import Card from './common/Card';
 import { Bet, AllUserTypes, BetChoice } from '../types';
@@ -18,7 +19,8 @@ interface SupabaseBetPayload {
 interface LiveBetsListProps {
   bets: Bet[]; // This will serve as the initial list of bets for a fight
   allUsers: { [id: string]: AllUserTypes };
-  fightId: number;
+  // FIX: Allow fightId to be null for the initial state where no fight exists.
+  fightId: number | null;
 }
 
 const LiveBetsList: React.FC<LiveBetsListProps> = ({ bets: initialBets, allUsers, fightId }) => {
@@ -31,8 +33,8 @@ const LiveBetsList: React.FC<LiveBetsListProps> = ({ bets: initialBets, allUsers
 
   // Effect to subscribe to real-time bet updates
   useEffect(() => {
-    // Ensure we have a valid client and fightId before subscribing
-    if (!supabase || !fightId) return;
+    // FIX: Ensure we have a valid client and fightId before subscribing to prevent errors.
+    if (!supabase || fightId === null) return;
 
     const handleNewBet = (payload: { new: SupabaseBetPayload }) => {
       const newBetPayload = payload.new;
@@ -82,7 +84,10 @@ const LiveBetsList: React.FC<LiveBetsListProps> = ({ bets: initialBets, allUsers
         <h3 className="text-lg font-semibold text-gray-200">Live Bets for Current Fight</h3>
       </div>
       <div className="max-h-96 overflow-y-auto">
-        {bets.length === 0 ? (
+        {/* FIX: Handle cases where there is no active fight or no bets yet. */}
+        {fightId === null ? (
+          <p className="text-gray-500 text-center p-6">No fight is currently active.</p>
+        ) : bets.length === 0 ? (
           <p className="text-gray-500 text-center p-6">No bets placed yet for this fight.</p>
         ) : (
           <ul className="divide-y divide-gray-800">

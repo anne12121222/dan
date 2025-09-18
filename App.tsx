@@ -291,7 +291,11 @@ const App: React.FC = () => {
     }
 
     const renderUserView = () => {
-        if (!currentUser || !fightId) return <div className="text-center p-8">Loading user data...</div>;
+        // FIX: Changed condition to only check for currentUser.
+        // This prevents the app from getting stuck on "Loading..." if no fights exist yet.
+        if (!currentUser) {
+            return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
+        }
 
         switch (currentUser.role) {
             case UserRole.PLAYER:
