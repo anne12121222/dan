@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
   FightResult, UpcomingFight, Bet, Transaction, CoinRequest, Message,
@@ -38,11 +37,14 @@ const App: React.FC = () => {
     const [messages, setMessages] = useState<{ [userId: string]: Message[] }>({});
     
     // UI State
+    const [isLoading, setIsLoading] = useState(true); // Global loading for auth check
     const [notification, setNotification] = useState<NotificationType | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    // FIX: Add state to hold agents for the registration form.
     const [registerableAgents, setRegisterableAgents] = useState<Agent[]>([]);
+    
+    const realtimeChannel = useRef<any>(null);
+
 
     const showNotification = useCallback((message: string, type: 'success' | 'error') => {
         setNotification({ id: Date.now(), message, type });
@@ -66,8 +68,10 @@ const App: React.FC = () => {
         return user;
     };
     
-    const refreshAllData = useCallback(async (userId?: string) => {
+    const refreshAllData = useCallback(async (userIdToRefresh?: string) => {
         if (!supabase) return;
+        const currentUserId = userIdToRefresh || currentUser?.id;
+        if (!currentUserId) return;
 
         // Fetch all users/profiles
         const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*');
@@ -78,8 +82,8 @@ const App: React.FC = () => {
                 return acc;
             }, {} as { [id: string]: AllUserTypes });
             setAllUsers(usersMap);
-            if (userId && usersMap[userId]) {
-                setCurrentUser(usersMap[userId]);
+            if (usersMap[currentUserId]) {
+                setCurrentUser(usersMap[currentUserId]);
             }
         }
         
@@ -91,8 +95,9 @@ const App: React.FC = () => {
             .limit(1)
             .single();
         
-        if (currentFightError) console.error('Error fetching current fight state:', currentFightError);
-        else if (currentFight) {
+        if (currentFightError && currentFightError.code !== 'PGRST116') { // Ignore "Row not found" error
+            console.error('Error fetching current fight state:', currentFightError);
+        } else if (currentFight) {
             setFightId(currentFight.id);
             setFightStatus(currentFight.status);
             setLastWinner(currentFight.winner);
@@ -109,32 +114,31 @@ const App: React.FC = () => {
                 }, { meron: 0, wala: 0 });
                 setPools(newPools);
             }
+        } else {
+             setFightId(null);
         }
 
         // Fetch fight history
         const { data: historyData, error: historyError } = await supabase.from('fights').select('*').order('created_at', { ascending: false }).limit(50);
         if (historyError) console.error('Error fetching fight history:', historyError);
-        else setFightHistory(historyData.map(f => ({...f, bets: []}))); // bets can be fetched on demand
+        else setFightHistory(historyData.map(f => ({...f, bets: []})));
 
         // Fetch upcoming fights
         const { data: upcomingData, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
         if (upcomingError) console.error('Error fetching upcoming fights:', upcomingError);
         else setUpcomingFights(upcomingData.map(uf => ({ ...uf, participants: uf.participants as any })));
 
-        // Fetch user-specific data if logged in
-        if (userId) {
-            const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
-            if(txsError) console.error("Error fetching transactions:", txsError);
-            else setTransactions(txs);
+        // Fetch user-specific data
+        const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
+        if(txsError) console.error("Error fetching transactions:", txsError);
+        else setTransactions(txs);
 
-            const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
-            if(reqsError) console.error("Error fetching coin requests:", reqsError);
-            else setCoinRequests(reqs);
-        }
+        const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
+        if(reqsError) console.error("Error fetching coin requests:", reqsError);
+        else setCoinRequests(reqs);
 
-    }, []);
+    }, [currentUser?.id]);
 
-    // FIX: New useEffect to fetch agents for the registration form on initial load.
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
             if (!isSupabaseConfigured || !supabase) return;
@@ -152,33 +156,34 @@ const App: React.FC = () => {
         fetchAgentsForRegistration();
     }, []);
 
-    // FIX: Overhauled authentication handling to be more robust.
     useEffect(() => {
-        if (!isSupabaseConfigured || !supabase) return;
+        if (!isSupabaseConfigured || !supabase) {
+            setIsLoading(false);
+            return;
+        }
 
         const handleAuthChange = async (session: any) => {
              if (session?.user) {
-                // First, verify the profile exists to prevent getting stuck.
-                // This can happen if a user is in auth.users but not public.profiles (e.g., manual creation).
                 const { data: profile, error } = await supabase
                     .from('profiles')
-                    .select('id')
+                    .select('*')
                     .eq('id', session.user.id)
                     .single();
 
                 if (error || !profile) {
                     console.error("Login failed: Could not find a user profile for the authenticated user.", error);
-                    showNotification("Login failed: Your user profile could not be loaded. Please contact support.", 'error');
-                    await supabase.auth.signOut(); // Force logout to prevent inconsistent state
+                    showNotification("Login failed: Your user profile could not be loaded.", 'error');
+                    await supabase.auth.signOut();
+                    setCurrentUser(null);
                 } else {
-                    // Profile exists, proceed to load all application data.
-                    await refreshAllData(session.user.id);
+                    setCurrentUser(mapProfileToUserType(profile));
+                    await refreshAllData(profile.id); // Load all other data
                 }
             } else {
-                // No session or logout event
                 setCurrentUser(null);
                 setAllUsers({});
             }
+            setIsLoading(false);
         };
 
         supabase.auth.getSession().then(({ data: { session } }) => handleAuthChange(session));
@@ -187,30 +192,37 @@ const App: React.FC = () => {
         return () => subscription.unsubscribe();
     }, [refreshAllData, showNotification]);
 
-
     useEffect(() => {
-        if (!supabase) return;
+        if (!supabase || !currentUser) {
+            if (realtimeChannel.current) {
+                supabase.removeChannel(realtimeChannel.current);
+                realtimeChannel.current = null;
+            }
+            return;
+        };
 
-        const changes = supabase.channel('realtime-all')
+        if (realtimeChannel.current) return; // Already subscribed
+
+        realtimeChannel.current = supabase.channel('realtime-all')
             .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
                 console.log('Realtime change received!', payload);
-                // A bit aggressive, but ensures data consistency on any change.
-                if(currentUser) {
-                    refreshAllData(currentUser.id);
-                }
+                refreshAllData(currentUser.id);
             })
             .subscribe();
 
         return () => {
-            supabase.removeChannel(changes);
+            if (realtimeChannel.current) {
+                supabase.removeChannel(realtimeChannel.current);
+                realtimeChannel.current = null;
+            }
         };
-    }, [currentUser, refreshAllData]);
+    }, [currentUser, refreshAllData, supabase]);
 
     const handleLogin = async (email: string, password: string): Promise<string | null> => {
         if (!isSupabaseConfigured) return "Supabase is not configured.";
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) return error.message;
-        // The onAuthStateChange listener will handle the rest.
+        // onAuthStateChange listener will handle the rest
         return null;
     };
     
@@ -227,9 +239,13 @@ const App: React.FC = () => {
 
     const handleLogout = async () => {
         if (!isSupabaseConfigured || !supabase) return;
+        setIsLoading(true);
         const { error } = await supabase.auth.signOut();
-        if (error) showNotification(`Error logging out: ${error.message}`, 'error');
-        else showNotification('You have been logged out.', 'success');
+        if (error) {
+            showNotification(`Error logging out: ${error.message}`, 'error');
+            setIsLoading(false);
+        }
+        // onAuthStateChange will handle setting user to null and isLoading to false
     };
     
     const handleStartNextFight = async () => {
@@ -244,10 +260,9 @@ const App: React.FC = () => {
         const { error } = await supabase.rpc('close_betting', { p_fight_id: fightId });
         if(error) handleRpcError(error, "Failed to close betting.");
         else showNotification('Betting is now closed.', 'success');
-    }, [fightId]);
+    }, [fightId, supabase]);
 
     useEffect(() => {
-        // FIX: Use ReturnType<typeof setInterval> for browser compatibility instead of NodeJS.Timeout.
         let interval: ReturnType<typeof setInterval> | null = null;
         if (fightStatus === FightStatus.BETTING_OPEN && timer > 0) {
             interval = setInterval(() => setTimer(t => t - 1), 1000);
@@ -329,8 +344,6 @@ const App: React.FC = () => {
     }
 
     const renderUserView = () => {
-        // FIX: Changed condition to only check for currentUser.
-        // This prevents the app from getting stuck on "Loading..." if no fights exist yet.
         if (!currentUser) {
             return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
         }
@@ -386,6 +399,14 @@ const App: React.FC = () => {
                 return <p>Loading view...</p>;
         }
     };
+    
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-screen bg-zinc-900 text-gray-400">
+                Loading Application...
+            </div>
+        );
+    }
     
     if (!currentUser) {
         return <AuthView onLogin={handleLogin} onRegister={handleRegister} isSupabaseConfigured={isSupabaseConfigured}
