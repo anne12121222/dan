@@ -512,6 +512,7 @@ BEGIN
   RETURN QUERY SELECT p.id, p.name, p.email, p.role, p.coin_balance, p.commission_balance, p.commission_rate, p.transfer_fee, p.agent_id, p.master_agent_id FROM public.profiles p;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+ALTER FUNCTION public.get_all_users_for_operator() SET search_path = public;
 
 
 -- User Creation Functions
