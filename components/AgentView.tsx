@@ -1,5 +1,3 @@
-
-// Grand Overhaul: This component is now fully functional and displays commission info.
 import React, { useState } from 'react';
 import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message, Bet, FightResult, MasterAgent, UserRole } from '../types';
 import TransactionHistory from './TransactionHistory';
@@ -56,6 +54,15 @@ const AgentView: React.FC<AgentViewProps> = ({
 
   const masterAgent = allUsers[currentUser.masterAgentId];
   const masterAgents = Object.values(allUsers).filter(u => u.role === UserRole.MASTER_AGENT) as MasterAgent[];
+
+  // FIX: Create a more robust filter that explicitly checks the sender's role. This guarantees that an agent's
+  // own outgoing requests (to Master Agents) will not appear in the list intended for incoming player requests.
+  const playerCoinRequests = coinRequests.filter(r => {
+    const fromUser = allUsers[r.from_user_id];
+    return r.status === 'PENDING' && 
+           r.to_user_id === currentUser.id && 
+           fromUser?.role === UserRole.PLAYER;
+  });
 
   return (
     <>
@@ -123,7 +130,7 @@ const AgentView: React.FC<AgentViewProps> = ({
                  </div>
             </Card>
           <PendingCoinRequests
-            requests={coinRequests.filter(r => r.status === 'PENDING')}
+            requests={playerCoinRequests}
             onRespond={onRespondToRequest}
             allUsers={allUsers}
             title="Player Coin Requests"

@@ -13,6 +13,8 @@ DROP TYPE IF EXISTS public.fight_status CASCADE;
 DROP TYPE IF EXISTS public.fight_winner CASCADE;
 DROP TYPE IF EXISTS public.bet_choice CASCADE;
 DROP TYPE IF EXISTS public.request_status CASCADE;
+-- FIX: Drop the old, conflicting type that causes function ambiguity.
+DROP TYPE IF EXISTS public.coin_request_status CASCADE;
 DROP TYPE IF EXISTS public.transaction_type CASCADE;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS public.start_next_fight() CASCADE;
@@ -39,6 +41,9 @@ DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_user_view_data() CASCADE;
+-- FIX: Drop new internal functions if they exist from a partial run
+DROP FUNCTION IF EXISTS public.internal_transfer_coins(uuid, uuid, numeric) CASCADE;
+DROP FUNCTION IF EXISTS public.internal_set_master_agent(uuid, uuid) CASCADE;
 
 
 -- 2. TYPES: Define custom data types
@@ -140,6 +145,7 @@ WITH CHECK (id = auth.uid());
 
 -- Bets policies
 CREATE POLICY "Allow players to see their own bets" ON public.bets FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Allow players to place their own bets" ON public.bets FOR INSERT WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Allow agents/masters to see their players'/agents' bets" ON public.bets FOR SELECT
 USING (
     user_id IN (SELECT id FROM public.profiles WHERE agent_id = auth.uid() OR master_agent_id = auth.uid())
@@ -149,8 +155,14 @@ USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
 -- Other policies for authenticated users
 CREATE POLICY "Allow users to see their own data" ON public.transactions FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
+CREATE POLICY "Allow users to create their own outgoing transactions" ON public.transactions FOR INSERT WITH CHECK (from_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own data" ON public.coin_requests FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
+CREATE POLICY "Allow users to create their own coin requests" ON public.coin_requests FOR INSERT WITH CHECK (from_user_id = auth.uid());
+-- FIX: Add a new UPDATE policy to allow the recipient of a request to change its status. This is crucial for the new approval workflow.
+CREATE POLICY "Allow recipients to update request status" ON public.coin_requests FOR UPDATE USING (to_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT USING (sender_id = auth.uid() OR receiver_id = auth.uid());
+CREATE POLICY "Allow users to send messages as themselves" ON public.messages FOR INSERT WITH CHECK (sender_id = auth.uid());
+
 
 CREATE POLICY "Allow operator to manage upcoming fights" ON public.upcoming_fights FOR ALL
 USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
@@ -186,6 +198,33 @@ CREATE TRIGGER on_auth_user_created
 
 
 -- 6. RPC FUNCTIONS: Define business logic
+
+-- FIX: Create internal, secure helper functions to perform privileged operations, bypassing RLS safely.
+-- This function securely moves coins between any two users.
+CREATE FUNCTION internal_transfer_coins(p_from_id uuid, p_to_id uuid, p_amount numeric)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = p_from_id;
+  UPDATE public.profiles SET coin_balance = coin_balance + p_amount WHERE id = p_to_id;
+  INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (p_from_id, p_to_id, p_amount, 'TRANSFER');
+END;
+$$;
+
+-- This function securely sets the master agent for an agent.
+CREATE FUNCTION internal_set_master_agent(p_agent_id uuid, p_master_agent_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  UPDATE public.profiles SET master_agent_id = p_master_agent_id WHERE id = p_agent_id;
+END;
+$$;
+
+
 -- Operator Functions
 CREATE FUNCTION public.start_next_fight()
 RETURNS void AS $$
@@ -219,9 +258,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- FIX: Changed p_winner from enum to text to resolve function ambiguity from the frontend.
 CREATE FUNCTION public.declare_winner(p_fight_id bigint, p_winner_text text)
-RETURNS void AS $$
+RETURNS void 
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   p_winner public.fight_winner;
   total_pool numeric;
@@ -246,14 +288,12 @@ BEGIN
     RAISE EXCEPTION 'Only operators can declare winners.';
   END IF;
 
-  -- Ensure the fight is in the correct state
   IF (SELECT status FROM public.fights WHERE id = p_fight_id) != 'BETTING_CLOSED' THEN
     RAISE EXCEPTION 'Fight is not ready to be settled.';
   END IF;
   
   UPDATE public.fights SET winner = p_winner, status = 'SETTLED' WHERE id = p_fight_id;
   
-  -- Handle DRAW or CANCELLED fights by refunding all bets
   IF p_winner = 'DRAW' OR p_winner = 'CANCELLED' THEN
     FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id LOOP
       UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount WHERE id = winning_bet.user_id;
@@ -262,43 +302,32 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Calculate pools and house rake for winning scenarios
   SELECT SUM(amount) INTO total_pool FROM public.bets WHERE fight_id = p_fight_id;
   
-  -- If no one bet, there's nothing to do
-  IF total_pool IS NULL OR total_pool = 0 THEN
-    RETURN; 
-  END IF;
+  IF total_pool IS NULL OR total_pool = 0 THEN RETURN; END IF;
   
   house_take := total_pool * house_rake_rate;
   distributable_pool := total_pool - house_take;
   
   SELECT SUM(amount) INTO winning_pool FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice;
   
-  -- If there were bets but no one chose the winner, the house takes the entire pool
   IF winning_pool IS NULL OR winning_pool = 0 THEN
     UPDATE public.profiles SET coin_balance = coin_balance + total_pool WHERE id = operator_id;
-    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, operator_id, total_pool, 'COMMISSION'); -- Using 'COMMISSION' for house profit
+    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, operator_id, total_pool, 'COMMISSION');
     UPDATE public.fights SET commission = total_pool WHERE id = p_fight_id;
     RETURN; 
   END IF;
   
-  -- Calculate payouts for winners
   payout_ratio := distributable_pool / winning_pool;
 
   FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice LOOP
     player_profit := (winning_bet.amount * payout_ratio) - winning_bet.amount;
     
-    -- Ensure profit is not negative due to floating point math
-    IF player_profit < 0 THEN
-      player_profit := 0;
-    END IF;
+    IF player_profit < 0 THEN player_profit := 0; END IF;
 
-    -- Pay the winner their original bet + profit
     UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount + player_profit WHERE id = winning_bet.user_id;
     INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, winning_bet.user_id, winning_bet.amount + player_profit, 'BET_WIN');
     
-    -- Calculate and distribute commissions based on player's profit
     SELECT * INTO agent_profile FROM public.profiles WHERE id = (SELECT agent_id FROM public.profiles WHERE id = winning_bet.user_id);
     IF agent_profile IS NOT NULL THEN
       agent_commission := player_profit * agent_profile.commission_rate;
@@ -316,12 +345,10 @@ BEGIN
     END IF;
   END LOOP;
   
-  -- The Operator's net profit is the house take minus commissions paid out
   UPDATE public.profiles SET coin_balance = coin_balance + (house_take - total_commission_paid) WHERE id = operator_id;
-  -- Store the gross house take in the fight record for auditing
   UPDATE public.fights SET commission = house_take WHERE id = p_fight_id;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 CREATE FUNCTION public.add_upcoming_fight(p_red text, p_white text)
 RETURNS void AS $$
@@ -370,9 +397,7 @@ DECLARE
 BEGIN
   SELECT * INTO current_user_profile FROM public.profiles WHERE id = auth.uid();
   
-  -- If a target is explicitly provided (Agent requesting from a specific Master Agent)
   IF p_target_user_id IS NOT NULL THEN
-    -- Security check: Ensure agents are requesting from Master Agents
     IF current_user_profile.role = 'AGENT' THEN
       SELECT role INTO target_user_role FROM public.profiles WHERE id = p_target_user_id;
       IF target_user_role != 'MASTER_AGENT' THEN
@@ -382,12 +407,10 @@ BEGIN
     ELSE
       RETURN 'Error: Specifying a request target is not allowed for your role.';
     END IF;
-  -- If no target is provided, use the hierarchy (Player requesting from their Agent)
   ELSE
     IF current_user_profile.role = 'PLAYER' THEN
       target_user_id := current_user_profile.agent_id;
     ELSE
-      -- Agents MUST now specify a target Master Agent.
       RETURN 'Error: You must select a Master Agent to request coins from.';
     END IF;
   END IF;
@@ -401,51 +424,62 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- FIX: Re-architected this function. It's now a standard function that relies on RLS and calls the new `internal_` helper functions
+-- to perform actions that require elevated privileges. This is a more robust and secure design.
 CREATE FUNCTION public.respond_to_coin_request(p_request_id uuid, p_response public.request_status)
-RETURNS text AS $$
+RETURNS text 
+LANGUAGE plpgsql
+AS $$
 DECLARE
   request public.coin_requests;
-  responder_balance numeric;
+  responder_profile public.profiles;
   requesting_user_profile public.profiles;
+  responder_id uuid := auth.uid();
 BEGIN
-  SELECT * INTO request FROM public.coin_requests WHERE id = p_request_id AND to_user_id = auth.uid();
+  -- We can select freely due to RLS policies.
+  SELECT * INTO responder_profile FROM public.profiles WHERE id = responder_id;
+  SELECT * INTO request FROM public.coin_requests WHERE id = p_request_id;
   
-  IF request IS NULL THEN
-    RETURN 'Error: Request not found or you are not authorized to respond.';
+  IF request IS NULL THEN RETURN 'Error: Request not found.'; END IF;
+  IF request.status != 'PENDING' THEN RETURN 'Error: This request has already been handled.'; END IF;
+
+  SELECT * INTO requesting_user_profile FROM public.profiles WHERE id = request.from_user_id;
+
+  -- AUTHORIZATION LOGIC
+  IF request.to_user_id != responder_id THEN
+    RETURN 'Error: You are not authorized to respond to this request.';
   END IF;
-  
-  IF request.status != 'PENDING' THEN
-    RETURN 'Error: This request has already been handled.';
+
+  IF (responder_profile.role = 'AGENT' AND requesting_user_profile.role != 'PLAYER') THEN
+    RETURN 'Error: Agents can only respond to requests from Players.';
+  END IF;
+
+  IF (responder_profile.role = 'MASTER_AGENT' AND requesting_user_profile.role != 'AGENT') THEN
+    RETURN 'Error: Master Agents can only respond to requests from Agents.';
   END IF;
 
   IF p_response = 'APPROVED' THEN
-    SELECT coin_balance INTO responder_balance FROM public.profiles WHERE id = auth.uid();
-    IF responder_balance < request.amount THEN
+    IF responder_profile.coin_balance < request.amount THEN
         RETURN 'Error: Insufficient balance to approve this request.';
     END IF;
 
-    -- Transfer coins
-    UPDATE public.profiles SET coin_balance = coin_balance - request.amount WHERE id = auth.uid();
-    UPDATE public.profiles SET coin_balance = coin_balance + request.amount WHERE id = request.from_user_id;
-    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (auth.uid(), request.from_user_id, request.amount, 'TRANSFER');
+    -- Call the secure helper function to move coins.
+    PERFORM internal_transfer_coins(responder_id, request.from_user_id, request.amount);
 
-    -- NEW LOGIC: "Adopt" the agent if they don't have a master agent
-    SELECT * INTO requesting_user_profile FROM public.profiles WHERE id = request.from_user_id;
-    
-    -- Only Master Agents can adopt Agents
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'MASTER_AGENT' AND requesting_user_profile.role = 'AGENT' THEN
-      -- Only adopt if the agent doesn't already have a master. This prevents poaching.
+    -- "Adoption" logic: if an MA approves an unassigned agent's request, they become their MA.
+    -- This now calls the secure helper function to update another user's profile.
+    IF responder_profile.role = 'MASTER_AGENT' AND requesting_user_profile.role = 'AGENT' THEN
       IF requesting_user_profile.master_agent_id IS NULL THEN
-        UPDATE public.profiles SET master_agent_id = auth.uid() WHERE id = request.from_user_id;
+        PERFORM internal_set_master_agent(request.from_user_id, responder_id);
       END IF;
     END IF;
-
   END IF;
   
+  -- The RLS policy allows the recipient (responder) to update the request.
   UPDATE public.coin_requests SET status = p_response WHERE id = p_request_id;
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Messaging Functions
 CREATE FUNCTION public.get_messages(p_other_user_id uuid)
@@ -512,15 +546,23 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE FUNCTION public.get_coin_requests_for_user()
-RETURNS TABLE(id uuid, from_user_id uuid, to_user_id uuid, amount numeric, status public.request_status, created_at timestamptz) AS $$
+CREATE OR REPLACE FUNCTION public.get_coin_requests_for_user()
+RETURNS TABLE(id uuid, from_user_id uuid, to_user_id uuid, amount numeric, status public.request_status, created_at timestamptz) 
+LANGUAGE plpgsql 
+SECURITY DEFINER SET search_path = public
+AS $$
 BEGIN
-  RETURN QUERY
-  SELECT r.id, r.from_user_id, r.to_user_id, r.amount, r.status, r.created_at
-  FROM public.coin_requests r
-  WHERE r.from_user_id = auth.uid() OR r.to_user_id = auth.uid();
+    RETURN QUERY
+    SELECT r.id, r.from_user_id, r.to_user_id, r.amount, r.status, r.created_at
+    FROM public.coin_requests r
+    WHERE
+        -- Users can always see requests they sent OR received.
+        r.from_user_id = auth.uid() OR
+        r.to_user_id = auth.uid()
+    ORDER BY r.created_at DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
 
 CREATE FUNCTION public.get_all_users_for_operator()
 RETURNS TABLE(id uuid, name text, email text, role public.user_role, coin_balance numeric, commission_balance numeric, commission_rate numeric, transfer_fee numeric, agent_id uuid, master_agent_id uuid) 
@@ -540,36 +582,44 @@ $$;
 CREATE OR REPLACE FUNCTION public.get_user_view_data()
 RETURNS SETOF public.profiles
 LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
+SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE
   v_user_profile public.profiles;
 BEGIN
-  -- Get the current user's full profile to check their role and relationships
   SELECT * INTO v_user_profile FROM public.profiles WHERE id = auth.uid();
-  
-  -- This function returns all profiles a user is allowed to see based on their role and hierarchy
-  RETURN QUERY
-  SELECT * FROM public.profiles p
-  WHERE
-    -- 1. The user themselves
-    p.id = auth.uid() OR
-    -- 2. Their direct agent superior (if they are a player)
-    p.id = v_user_profile.agent_id OR
-    -- 3. Their direct master agent superior (if they are an agent)
-    p.id = v_user_profile.master_agent_id OR
-    -- 4. Their direct player subordinates (if they are an agent)
-    p.agent_id = auth.uid() OR
-    -- 5. Their direct agent subordinates (if they are a master agent)
-    p.master_agent_id = auth.uid() OR
-    -- 6. SPECIAL CASE: Agents need to see all Master Agents to make a request
-    (v_user_profile.role = 'AGENT' AND p.role = 'MASTER_AGENT');
+
+  IF v_user_profile.role = 'PLAYER' THEN
+    RETURN QUERY SELECT * FROM public.profiles WHERE id = auth.uid() OR id = v_user_profile.agent_id;
+
+  ELSIF v_user_profile.role = 'AGENT' THEN
+    RETURN QUERY
+      -- The agent themselves
+      SELECT * FROM public.profiles WHERE id = auth.uid()
+      UNION
+      -- Their players
+      SELECT * FROM public.profiles WHERE agent_id = auth.uid()
+      UNION
+      -- ALL Master Agents (for requests)
+      SELECT * FROM public.profiles WHERE role = 'MASTER_AGENT';
+
+  ELSIF v_user_profile.role = 'MASTER_AGENT' THEN
+    RETURN QUERY
+      -- The master agent themselves
+      SELECT * FROM public.profiles WHERE id = auth.uid()
+      UNION
+      -- Their directly assigned agents
+      SELECT * FROM public.profiles WHERE master_agent_id = auth.uid()
+      UNION
+      -- Any user who has a pending request for them (to prevent "Unknown User")
+      SELECT p.* FROM public.profiles p JOIN public.coin_requests cr ON p.id = cr.from_user_id
+      WHERE cr.to_user_id = auth.uid() AND cr.status = 'PENDING';
+      
+  END IF;
 END;
 $$;
 
 
--- Function for registration form
 CREATE OR REPLACE FUNCTION public.get_registerable_agents()
 RETURNS TABLE(id uuid, name text) 
 LANGUAGE plpgsql 
