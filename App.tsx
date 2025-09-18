@@ -296,10 +296,21 @@ const App: React.FC = () => {
         const debouncedRefresh = debounce(refreshAllData, 500);
 
         realtimeChannel.current = supabase.channel('realtime-all')
-            .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-                console.log('Realtime change received!', payload);
-                // Call the debounced function instead of the raw one
-                debouncedRefresh();
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, debouncedRefresh)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, debouncedRefresh)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'bets' }, debouncedRefresh)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'coin_requests' }, debouncedRefresh)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, debouncedRefresh)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+                const newMessage = payload.new as Message;
+                setAllMessages(prev => {
+                    const conversationId = newMessage.senderId === currentUser.id ? newMessage.receiverId : newMessage.senderId;
+                    const existingMessages = prev[conversationId] || [];
+                    return {
+                        ...prev,
+                        [conversationId]: [...existingMessages, newMessage],
+                    };
+                });
             })
             .subscribe();
 
@@ -440,31 +451,61 @@ const App: React.FC = () => {
         return null;
     };
 
-    const handleCreateAgent = async (name: string, email: string, password: string):Promise<string|null> => {
+    const handleCreateAgent = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_agent', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create agent.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Agent created successfully!', 'success');
-        return null;
+        try {
+            const response = await fetch('/functions/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password, role: 'AGENT', master_agent_id: currentUser?.id }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return handleRpcError(data, "Failed to create agent.");
+            }
+            showNotification('Agent created successfully!', 'success');
+            return null;
+        } catch (error) {
+            return handleRpcError(error, "Failed to create agent.");
+        }
     };
 
-    const handleCreateMasterAgent = async (name: string, email: string, password: string):Promise<string|null> => {
+    const handleCreateMasterAgent = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_master_agent', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create master agent.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Master Agent created successfully!', 'success');
-        return null;
+        try {
+            const response = await fetch('/functions/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password, role: 'MASTER_AGENT' }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return handleRpcError(data, "Failed to create master agent.");
+            }
+            showNotification('Master Agent created successfully!', 'success');
+            return null;
+        } catch (error) {
+            return handleRpcError(error, "Failed to create master agent.");
+        }
     };
-    
-    const handleCreateOperator = async (name: string, email: string, password: string):Promise<string|null> => {
+
+    const handleCreateOperator = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_operator', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create operator.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Operator created successfully!', 'success');
-        return null;
+        try {
+            const response = await fetch('/functions/create-user', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password, role: 'OPERATOR' }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                return handleRpcError(data, "Failed to create operator.");
+            }
+            showNotification('Operator created successfully!', 'success');
+            return null;
+        } catch (error) {
+            return handleRpcError(error, "Failed to create operator.");
+        }
     };
 
     const renderUserView = () => {

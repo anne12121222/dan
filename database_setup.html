@@ -24,9 +24,7 @@ DROP FUNCTION IF EXISTS public.create_coin_request(numeric) CASCADE;
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status) CASCADE;
 DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric) CASCADE;
-DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
-DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
-DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
+
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 -- Drop the new helper functions if they exist from a previous run
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
@@ -549,67 +547,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ALTER FUNCTION public.get_all_users_for_operator() SET search_path = public;
 
 
--- User Creation Functions
-CREATE FUNCTION public.create_agent(p_name text, p_email text, p_password text)
-RETURNS text AS $$
-DECLARE
-  new_user_id uuid;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'MASTER_AGENT' THEN
-    RETURN 'Error: Only Master Agents can create Agents.';
-  END IF;
 
-  -- Create the user in auth.users
-  SELECT id FROM auth.admin_create_user(
-    p_email, 
-    p_password, 
-    jsonb_build_object('name', p_name, 'role', 'AGENT', 'master_agent_id', auth.uid())
-  ) INTO new_user_id;
-  
-  RETURN 'Agent ' || p_name || ' created successfully.';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-ALTER FUNCTION public.create_agent(text, text, text) SET search_path = '';
-
-CREATE FUNCTION public.create_master_agent(p_name text, p_email text, p_password text)
-RETURNS text AS $$
-DECLARE
-  new_user_id uuid;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-    RETURN 'Error: Only Operators can create Master Agents.';
-  END IF;
-
-  SELECT id FROM auth.admin_create_user(
-    p_email, 
-    p_password, 
-    jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')
-  ) INTO new_user_id;
-
-  RETURN 'Master Agent ' || p_name || ' created successfully.';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-ALTER FUNCTION public.create_master_agent(text, text, text) SET search_path = '';
-
-CREATE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
-RETURNS text AS $$
-DECLARE
-  new_user_id uuid;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-    RETURN 'Error: Only Operators can create other Operators.';
-  END IF;
-
-  SELECT id FROM auth.admin_create_user(
-    p_email, 
-    p_password, 
-    jsonb_build_object('name', p_name, 'role', 'OPERATOR')
-  ) INTO new_user_id;
-
-  RETURN 'Operator ' || p_name || ' created successfully.';
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-ALTER FUNCTION public.create_operator(text, text, text) SET search_path = '';
 
 
 -- Function for registration form
