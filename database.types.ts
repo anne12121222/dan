@@ -277,7 +277,109 @@ export interface Database {
       [key: string]: never
     }
     Functions: {
-      [key: string]: never
+      add_upcoming_fight: {
+        Args: { p_red: string; p_white: string }
+        Returns: undefined
+      }
+      close_betting: {
+        Args: { p_fight_id: number }
+        Returns: undefined
+      }
+      create_agent: {
+        Args: { p_name: string; p_email: string; p_password: string }
+        Returns: string
+      }
+      create_coin_request: {
+        Args: { p_amount: number }
+        Returns: string
+      }
+      create_master_agent: {
+        Args: { p_name: string; p_email: string; p_password: string }
+        Returns: string
+      }
+      create_operator: {
+        Args: { p_name: string; p_email: string; p_password: string }
+        Returns: string
+      }
+      declare_winner: {
+        Args: { p_fight_id: number; p_winner: Database["public"]["Enums"]["fight_winner"] }
+        Returns: undefined
+      }
+      get_all_users_for_operator: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          name: string
+          email: string
+          role: Database["public"]["Enums"]["user_role"]
+          coin_balance: number
+          commission_balance: number
+          commission_rate: number
+          transfer_fee: number
+          agent_id: string | null
+          master_agent_id: string | null
+        }[]
+      }
+      get_coin_requests_for_user: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          from_user_id: string
+          to_user_id: string
+          amount: number
+          status: Database["public"]["Enums"]["request_status"]
+          created_at: string
+        }[]
+      }
+      get_messages: {
+        Args: { p_other_user_id: string }
+        Returns: {
+          id: string
+          sender_id: string
+          receiver_id: string
+          text: string
+          amount: number | null
+          created_at: string
+        }[]
+      }
+      get_registerable_agents: {
+        Args: Record<PropertyKey, never>
+        Returns: { id: string; name: string }[]
+      }
+      get_transactions_for_user: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          from_user_id: string | null
+          to_user_id: string | null
+          amount: number
+          type: Database["public"]["Enums"]["transaction_type"]
+          transaction_timestamp: string
+        }[]
+      }
+      place_bet: {
+        Args: {
+          p_fight_id: number
+          p_amount: number
+          p_choice: Database["public"]["Enums"]["bet_choice"]
+        }
+        Returns: string
+      }
+      respond_to_coin_request: {
+        Args: {
+          p_request_id: string
+          p_response: Database["public"]["Enums"]["request_status"]
+        }
+        Returns: string
+      }
+      send_message_and_coins: {
+        Args: { p_receiver_id: string; p_text: string; p_amount: number }
+        Returns: string
+      }
+      start_next_fight: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       bet_choice: "RED" | "WHITE"

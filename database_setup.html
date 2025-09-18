@@ -31,6 +31,10 @@ DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
+-- Drop old, problematic helper functions if they exist
+DROP FUNCTION IF EXISTS public.get_my_role() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
+DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
 
 
 -- 2. TYPES: Define custom data types
@@ -121,29 +125,27 @@ CREATE POLICY "Allow public read access to upcoming fights" ON public.upcoming_f
 
 -- A single, robust, non-recursive policy for profiles.
 -- Allows users to see themselves, their direct superiors, and their direct subordinates.
-CREATE POLICY "Allow hierarchical read access" ON public.profiles FOR SELECT
+CREATE POLICY "Allow hierarchical and self read access" ON public.profiles FOR SELECT
 USING (
   -- Users can see themselves
   id = auth.uid() OR
-  -- A master agent can see their agents
+  -- Superiors can see their direct subordinates
   (
-    (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'MASTER_AGENT' AND
-    master_agent_id = auth.uid()
+    id IN (
+      SELECT p.id FROM public.profiles p WHERE
+        (p.agent_id = auth.uid() AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'AGENT') OR
+        (p.master_agent_id = auth.uid() AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'MASTER_AGENT')
+    )
   ) OR
-  -- An agent can see their players
+  -- Subordinates can see their direct superiors
   (
-    (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'AGENT' AND
-    agent_id = auth.uid()
-  ) OR
-   -- An agent can see their master agent
-  (
-    id = (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid())
-  ) OR
-  -- A player can see their agent
-  (
-    id = (SELECT agent_id FROM public.profiles WHERE id = auth.uid())
+    id IN (
+      (SELECT agent_id FROM public.profiles WHERE id = auth.uid()),
+      (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid())
+    )
   )
 );
+
 
 -- Bets policies
 CREATE POLICY "Allow players to see their own bets" ON public.bets FOR SELECT USING (user_id = auth.uid());
@@ -182,20 +184,23 @@ WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR
 
 
 -- 5. TRIGGERS: Automate profile creation
+-- This version is robust and handles user creation from the Supabase dashboard.
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.profiles (id, name, email, role, agent_id)
   VALUES (
     NEW.id,
-    NEW.raw_user_meta_data->>'name',
+    -- Provide a default for name if not in metadata
+    COALESCE(NEW.raw_user_meta_data->>'name', NEW.email, 'New User'),
     NEW.email,
-    (NEW.raw_user_meta_data->>'role')::public.user_role,
+    -- Default role to PLAYER if not specified
+    COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'),
     (NEW.raw_user_meta_data->>'agent_id')::uuid
   );
 
   -- Give new players a starting balance
-  IF (NEW.raw_user_meta_data->>'role')::public.user_role = 'PLAYER' THEN
+  IF COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER') = 'PLAYER' THEN
     UPDATE public.profiles SET coin_balance = 1000 WHERE id = NEW.id;
   END IF;
 
@@ -517,7 +522,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
 -- User Creation Functions
--- Added SET search_path to resolve cross-database reference error.
 CREATE FUNCTION public.create_agent(p_name text, p_email text, p_password text)
 RETURNS text AS $$
 DECLARE
@@ -535,7 +539,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 ALTER FUNCTION public.create_agent(text, text, text) SET search_path = public;
 
--- Added SET search_path to resolve cross-database reference error.
 CREATE FUNCTION public.create_master_agent(p_name text, p_email text, p_password text)
 RETURNS text AS $$
 DECLARE
@@ -552,7 +555,6 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 ALTER FUNCTION public.create_master_agent(text, text, text) SET search_path = public;
 
--- Added SET search_path to resolve cross-database reference error.
 CREATE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
 RETURNS text AS $$
 DECLARE
