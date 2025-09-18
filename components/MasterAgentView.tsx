@@ -59,6 +59,8 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   const [isCreateAgentModalOpen, setCreateAgentModalOpen] = useState(false);
   const [isCreateOperatorModalOpen, setCreateOperatorModalOpen] = useState(false); // New State
 
+  const operator = Object.values(allUsers).find(u => u.role === UserRole.OPERATOR);
+
   const handleSendMessage = async (text: string, amount: number) => {
     if (chatTargetUser) {
         await onSendMessage(chatTargetUser.id, text, amount);
@@ -71,6 +73,14 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
         <div className="lg:col-span-2 space-y-6">
             <div className="flex justify-between items-center flex-wrap gap-2">
                  <h2 className="text-2xl font-bold text-gray-200">Master Agent Dashboard</h2>
+                 {operator && (
+                    <button
+                        onClick={() => onOpenChat(operator)}
+                        className="bg-zinc-600 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                    >
+                        Chat with Operator
+                    </button>
+                 )}
                  <div className="flex items-center gap-2 flex-wrap">
                     <button 
                         onClick={() => setCreateAgentModalOpen(true)}

@@ -14,6 +14,20 @@ import NotificationComponent from './components/Notification';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import ChangePasswordModal from './components/ChangePasswordModal';
 
+// Debounce utility function to prevent excessive re-renders from rapid realtime events
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const debounced = (...args: Parameters<F>) => {
+        if (timeout !== null) {
+            clearTimeout(timeout);
+        }
+        timeout = setTimeout(() => func(...args), waitFor);
+    };
+
+    return debounced as (...args: Parameters<F>) => void;
+}
+
 
 const FIGHT_TIMER_DURATION = 15; // 15 seconds for betting
 
@@ -175,11 +189,14 @@ const App: React.FC = () => {
         else setUpcomingFights(upcomingData.map(uf => ({ ...uf, participants: uf.participants as any })));
 
         // Fetch user-specific data
-        const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
+        // FIX: Query tables directly to leverage hierarchical RLS policies instead of using flawed RPCs.
+        // This correctly shows subordinate transactions for agents/masters.
+        const { data: txs, error: txsError } = await supabase.from('transactions').select('*').order('transaction_timestamp', { ascending: false });
         if(txsError) console.error("Error fetching transactions:", txsError);
         else setTransactions(txs);
 
-        const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
+        // FIX: Query table directly for consistency and to rely on RLS.
+        const { data: reqs, error: reqsError } = await supabase.from('coin_requests').select('*');
         if(reqsError) console.error("Error fetching coin requests:", reqsError);
         else setCoinRequests(reqs);
         
@@ -275,17 +292,24 @@ const App: React.FC = () => {
 
         if (realtimeChannel.current) return;
 
+        // Create a debounced version of refreshAllData to prevent rapid-fire updates
+        const debouncedRefresh = debounce(refreshAllData, 500);
+
         realtimeChannel.current = supabase.channel('realtime-all')
             .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
                 console.log('Realtime change received!', payload);
-                refreshAllData();
+                // Call the debounced function instead of the raw one
+                debouncedRefresh();
             })
             .subscribe();
 
         return () => {
             if (realtimeChannel.current) {
-                supabase.removeChannel(realtimeChannel.current);
-                realtimeChannel.current = null;
+                // It's good practice to unsubscribe before removing the channel
+                realtimeChannel.current.unsubscribe().then(() => {
+                    supabase.removeChannel(realtimeChannel.current);
+                    realtimeChannel.current = null;
+                });
             }
         };
     }, [currentUser, refreshAllData, supabase]);
@@ -452,8 +476,10 @@ const App: React.FC = () => {
 
         switch (effectiveRole) {
             case UserRole.PLAYER:
+                // Performance Optimization: Create a lookup map for player bets to avoid N*M complexity.
+                const playerBetsByFightId = new Map(playerBets.map(bet => [bet.fightId, bet]));
                 const playerHistory: PlayerFightHistoryEntry[] = fightHistory.map(fh => {
-                    const bet = playerBets.find(b => b.fightId === fh.id);
+                    const bet = playerBetsByFightId.get(fh.id);
                     let outcome: PlayerFightHistoryEntry['outcome'] = undefined;
                     if(bet){
                         if(fh.winner === "DRAW" || fh.winner === "CANCELLED") outcome = 'REFUND';
