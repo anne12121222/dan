@@ -60,15 +60,47 @@ const App: React.FC = () => {
     };
 
     const mapProfileToUserType = (profile: any): AllUserTypes => {
-        const user: AllUserTypes = {
-            id: profile.id, name: profile.name, email: profile.email, role: profile.role, coinBalance: profile.coin_balance,
-            commissionBalance: profile.commission_balance,
-            commissionRate: profile.commission_rate,
-            transferFee: profile.transfer_fee,
-            ...(profile.role === UserRole.PLAYER && { agentId: profile.agent_id! }),
-            ...(profile.role === UserRole.AGENT && { masterAgentId: profile.master_agent_id! }),
+        const baseUser = {
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+            role: profile.role,
+            coinBalance: profile.coin_balance,
         };
-        return user;
+
+        switch (profile.role) {
+            case UserRole.PLAYER:
+                return {
+                    ...baseUser,
+                    role: UserRole.PLAYER,
+                    agentId: profile.agent_id!,
+                };
+            case UserRole.AGENT:
+                return {
+                    ...baseUser,
+                    role: UserRole.AGENT,
+                    masterAgentId: profile.master_agent_id!,
+                    commissionBalance: profile.commission_balance,
+                    commissionRate: profile.commission_rate,
+                    transferFee: profile.transfer_fee,
+                };
+            case UserRole.MASTER_AGENT:
+                return {
+                    ...baseUser,
+                    role: UserRole.MASTER_AGENT,
+                    commissionBalance: profile.commission_balance,
+                    commissionRate: profile.commission_rate,
+                    transferFee: profile.transfer_fee,
+                };
+            case UserRole.OPERATOR:
+                return {
+                    ...baseUser,
+                    role: UserRole.OPERATOR,
+                };
+            default:
+                // This should not be reached with valid data
+                return baseUser as AllUserTypes;
+        }
     };
     
     const refreshAllData = useCallback(async () => {

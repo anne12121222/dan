@@ -527,7 +527,11 @@ BEGIN
   END IF;
 
   -- Create the user in auth.users
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'AGENT', 'master_agent_id', auth.uid())) INTO new_user_id;
+  SELECT id FROM auth.admin_create_user(
+    p_email, 
+    p_password, 
+    jsonb_build_object('name', p_name, 'role', 'AGENT', 'master_agent_id', auth.uid())
+  ) INTO new_user_id;
   
   RETURN 'Agent ' || p_name || ' created successfully.';
 END;
@@ -543,7 +547,11 @@ BEGIN
     RETURN 'Error: Only Operators can create Master Agents.';
   END IF;
 
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')) INTO new_user_id;
+  SELECT id FROM auth.admin_create_user(
+    p_email, 
+    p_password, 
+    jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')
+  ) INTO new_user_id;
 
   RETURN 'Master Agent ' || p_name || ' created successfully.';
 END;
@@ -559,7 +567,11 @@ BEGIN
     RETURN 'Error: Only Master Agents can create Operators.';
   END IF;
 
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'OPERATOR')) INTO new_user_id;
+  SELECT id FROM auth.admin_create_user(
+    p_email, 
+    p_password, 
+    jsonb_build_object('name', p_name, 'role', 'OPERATOR')
+  ) INTO new_user_id;
 
   RETURN 'Operator ' || p_name || ' created successfully.';
 END;
