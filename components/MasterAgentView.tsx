@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { MasterAgent, Agent, AllUserTypes, UserRole, MasterAgentViewProps, FightStatus } from '../types';
 import TransactionHistory from './TransactionHistory';

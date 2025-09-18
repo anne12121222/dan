@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Player, FightStatus, Bet, PlayerFightHistoryEntry, UpcomingFight, FightResult, AllUserTypes, UserRole, Agent, PlayerViewProps } from '../types';
 import LiveFeed from './LiveFeed';

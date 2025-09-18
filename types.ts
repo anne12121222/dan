@@ -1,4 +1,3 @@
-
 // Enums matching the database schema
 export enum UserRole {
   OPERATOR = 'OPERATOR',
