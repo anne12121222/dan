@@ -185,10 +185,17 @@ const App: React.FC = () => {
             setIsLoading(false); // Authentication check is complete, render the app
         };
 
-        supabase.auth.getSession().then(({ data: { session } }) => handleAuthChange(session));
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => handleAuthChange(session));
+        // onAuthStateChange fires immediately with the current session and listens for all auth events.
+        // This is the most robust way to handle auth in Supabase.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            handleAuthChange(session);
+        });
         
-        return () => subscription.unsubscribe();
+        return () => {
+            if (subscription) {
+                subscription.unsubscribe();
+            }
+        };
     }, [showNotification]);
 
     // Effect for fetching data after a user has been authenticated
