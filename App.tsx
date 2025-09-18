@@ -47,6 +47,10 @@ const App: React.FC = () => {
     const [isMasquerading, setIsMasquerading] = useState(false);
     
     const realtimeChannel = useRef<any>(null);
+    const chatTargetUserRef = useRef<AllUserTypes | null>(null);
+    useEffect(() => {
+        chatTargetUserRef.current = chatTargetUser;
+    }, [chatTargetUser]);
 
 
     const showNotification = useCallback((message: string, type: 'success' | 'error') => {
@@ -158,16 +162,17 @@ const App: React.FC = () => {
         }
 
         // FIX: Also refresh messages for the currently open chat window to ensure real-time updates.
-        if (chatTargetUser) {
-            const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: chatTargetUser.id });
+        const currentChatTarget = chatTargetUserRef.current;
+        if (currentChatTarget) {
+            const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: currentChatTarget.id });
             if (error) {
-                 console.error(`Failed to refresh messages for ${chatTargetUser.name}`, error);
+                 console.error(`Failed to refresh messages for ${currentChatTarget.name}`, error);
             } else {
-                setAllMessages(prev => ({...prev, [chatTargetUser.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
+                setAllMessages(prev => ({...prev, [currentChatTarget.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
             }
         }
 
-    }, [currentUser, chatTargetUser]);
+    }, [currentUser, supabase]);
 
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
@@ -384,30 +389,12 @@ const App: React.FC = () => {
         return null;
     };
 
-    const handleCreateAgent = async (name: string, email: string, password: string):Promise<string|null> => {
-        if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_agent', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create agent.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Agent created successfully!', 'success');
-        return null;
-    };
-
     const handleCreateMasterAgent = async (name: string, email: string, password: string):Promise<string|null> => {
         if (!supabase) return "Not connected";
         const { data, error } = await supabase.rpc('create_master_agent', { p_name: name, p_email: email, p_password: password });
         if(error) return handleRpcError(error, "Failed to create master agent.");
         if(data && data.startsWith('Error:')) return data;
         showNotification(data || 'Master Agent created successfully!', 'success');
-        return null;
-    };
-    
-    const handleCreateOperator = async (name: string, email: string, password: string):Promise<string|null> => {
-        if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_operator', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create operator.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Operator created successfully!', 'success');
         return null;
     };
 
@@ -454,12 +441,11 @@ const App: React.FC = () => {
                         agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT && u.masterAgentId === currentUser.id) as Agent[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
                         onRespondToRequest={onRespondToRequest} onSendMessage={onSendMessage}
-                        messages={allMessages} allUsers={allUsers} onCreateAgent={handleCreateAgent} onOpenChat={handleOpenChat}
+                        messages={allMessages} allUsers={allUsers} onOpenChat={handleOpenChat}
                         chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
                         fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} 
                         fightHistory={fightHistory} upcomingFights={upcomingFights}
                         onMasquerade={() => setIsMasquerading(true)}
-                        onCreateOperator={handleCreateOperator}
                     />
                 );
             case UserRole.OPERATOR:

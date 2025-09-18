@@ -519,24 +519,6 @@ $$;
 
 
 -- User Creation Functions
-CREATE OR REPLACE FUNCTION public.create_agent(p_name text, p_email text, p_password text)
-RETURNS text 
-LANGUAGE plpgsql 
-SECURITY DEFINER 
-SET search_path = public
-AS $$
-DECLARE
-  new_user_id uuid;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'MASTER_AGENT' THEN
-    RETURN 'Error: Only Master Agents can create Agents.';
-  END IF;
-  -- Create the user in auth.users
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'AGENT', 'master_agent_id', auth.uid())) INTO new_user_id;
-  RETURN 'Agent ' || p_name || ' created successfully.';
-END;
-$$;
-
 CREATE OR REPLACE FUNCTION public.create_master_agent(p_name text, p_email text, p_password text)
 RETURNS text 
 LANGUAGE plpgsql 
@@ -551,23 +533,6 @@ BEGIN
   END IF;
   SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')) INTO new_user_id;
   RETURN 'Master Agent ' || p_name || ' created successfully.';
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
-RETURNS text 
-LANGUAGE plpgsql 
-SECURITY DEFINER 
-SET search_path = public
-AS $$
-DECLARE
-  new_user_id uuid;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'MASTER_AGENT' THEN
-    RETURN 'Error: Only Master Agents can create Operators.';
-  END IF;
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'OPERATOR')) INTO new_user_id;
-  RETURN 'Operator ' || p_name || ' created successfully.';
 END;
 $$;
 

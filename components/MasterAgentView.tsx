@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { MasterAgent, Agent, Transaction, CoinRequest, AllUserTypes, Message, UserRole, FightStatus, FightWinner, FightResult, UpcomingFight } from '../types';
 import TransactionHistory from './TransactionHistory';
 import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
 import Card from './common/Card';
-import CreateAgentModal from './CreateAgentModal';
-import CreateOperatorModal from './CreateOperatorModal'; // New Import
-import { UsersIcon, CoinTransferIcon, UserPlusIcon } from './common/Icons';
+import { UsersIcon, CoinTransferIcon } from './common/Icons';
 import LiveFeed from './LiveFeed';
 import UpcomingFightsList from './UpcomingFightsList';
 import CompletedFightsList from './CompletedFightsList';
@@ -18,8 +16,6 @@ interface MasterAgentViewProps {
   coinRequests: CoinRequest[];
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
-  onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
-  onCreateOperator: (name: string, email: string, password: string) => Promise<string | null>; // New Prop
   messages: { [userId: string]: Message[] };
   allUsers: { [id:string]: AllUserTypes };
   onOpenChat: (user: AllUserTypes) => void;
@@ -31,7 +27,7 @@ interface MasterAgentViewProps {
   timer: number;
   fightHistory: FightResult[];
   upcomingFights: UpcomingFight[];
-  onMasquerade: () => void; // New Prop
+  onMasquerade: () => void; 
 }
 
 const MasterAgentView: React.FC<MasterAgentViewProps> = ({
@@ -41,8 +37,6 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   coinRequests,
   onRespondToRequest,
   onSendMessage,
-  onCreateAgent,
-  onCreateOperator,
   messages,
   allUsers,
   onOpenChat,
@@ -56,8 +50,6 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   upcomingFights,
   onMasquerade,
 }) => {
-  const [isCreateAgentModalOpen, setCreateAgentModalOpen] = useState(false);
-  const [isCreateOperatorModalOpen, setCreateOperatorModalOpen] = useState(false); // New State
 
   const handleSendMessage = async (text: string, amount: number) => {
     if (chatTargetUser) {
@@ -72,20 +64,6 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
             <div className="flex justify-between items-center flex-wrap gap-2">
                  <h2 className="text-2xl font-bold text-gray-200">Master Agent Dashboard</h2>
                  <div className="flex items-center gap-2 flex-wrap">
-                    <button 
-                        onClick={() => setCreateAgentModalOpen(true)}
-                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
-                    >
-                        <UserPlusIcon className="w-5 h-5" />
-                        Create Agent
-                    </button>
-                    <button 
-                        onClick={() => setCreateOperatorModalOpen(true)}
-                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
-                    >
-                        <UserPlusIcon className="w-5 h-5" />
-                        Create Operator
-                    </button>
                      <button 
                         onClick={onMasquerade}
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition"
@@ -160,18 +138,6 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
           onClose={onCloseChat}
           onSendMessage={handleSendMessage}
         />
-      )}
-      {isCreateAgentModalOpen && (
-          <CreateAgentModal
-            onClose={() => setCreateAgentModalOpen(false)}
-            onSubmit={onCreateAgent}
-          />
-      )}
-       {isCreateOperatorModalOpen && (
-          <CreateOperatorModal
-            onClose={() => setCreateOperatorModalOpen(false)}
-            onSubmit={onCreateOperator}
-          />
       )}
     </>
   );
