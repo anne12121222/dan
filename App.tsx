@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
@@ -287,9 +288,13 @@ const App: React.FC = () => {
         setIsLoading(true);
         const { error } = await supabase.auth.signOut();
         if (error) {
-            showNotification(`Error logging out: ${error.message}`, 'error');
-            setIsLoading(false);
+            // Gracefully handle cases where the session is already missing
+            if (error.message !== 'Auth session missing!') {
+                showNotification(`Error logging out: ${error.message}`, 'error');
+            }
+            setIsLoading(false); // Ensure loading state is reset on error
         }
+        // On successful signout, the onAuthStateChange listener will handle resetting state and isLoading.
     };
     
     const handleStartNextFight = async () => {
@@ -346,9 +351,13 @@ const App: React.FC = () => {
         return null;
     };
     
-    const onCreateCoinRequest = async (amount: number): Promise<string | null> => {
+    const onCreateCoinRequest = async (amount: number, targetUserId?: string): Promise<string | null> => {
         if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_coin_request', { p_amount: amount });
+        const params = {
+            p_amount: amount,
+            p_target_user_id: targetUserId || null
+        };
+        const { data, error } = await supabase.rpc('create_coin_request', params);
         if (error) return handleRpcError(error, "Failed to create request.");
         if (data) return data;
         showNotification(`Coin request of ${amount} sent.`, 'success');

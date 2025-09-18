@@ -23,7 +23,7 @@ interface PlayerViewProps {
   isDrawerOpen: boolean;
   onCloseDrawer: () => void;
   upcomingFights: UpcomingFight[];
-  onCreateCoinRequest: (amount: number) => Promise<string | null>;
+  onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
 }
 
 const PlayerView: React.FC<PlayerViewProps> = ({

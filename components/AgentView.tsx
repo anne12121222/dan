@@ -1,11 +1,12 @@
+
 // Grand Overhaul: This component is now fully functional and displays commission info.
 import React, { useState } from 'react';
-import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message, Bet, FightResult } from '../types';
+import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message, Bet, FightResult, MasterAgent, UserRole } from '../types';
 import TransactionHistory from './TransactionHistory';
 import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
 import Card from './common/Card';
-import RequestCoinsModal from './RequestCoinsModal';
+import RequestCoinsToMasterAgentModal from './RequestCoinsToMasterAgentModal';
 import { UsersIcon, CoinTransferIcon } from './common/Icons';
 import LiveBetsList from './LiveBetsList';
 import Trends from './Trends';
@@ -16,7 +17,7 @@ interface AgentViewProps {
   transactions: Transaction[];
   coinRequests: CoinRequest[];
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
-  onCreateCoinRequest: (amount: number) => Promise<string | null>;
+  onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
   onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
   messages: { [userId: string]: Message[] };
   allUsers: { [id: string]: AllUserTypes };
@@ -54,6 +55,7 @@ const AgentView: React.FC<AgentViewProps> = ({
   };
 
   const masterAgent = allUsers[currentUser.masterAgentId];
+  const masterAgents = Object.values(allUsers).filter(u => u.role === UserRole.MASTER_AGENT) as MasterAgent[];
 
   return (
     <>
@@ -139,9 +141,10 @@ const AgentView: React.FC<AgentViewProps> = ({
         />
       )}
       {isRequestModalOpen && (
-          <RequestCoinsModal 
+          <RequestCoinsToMasterAgentModal 
             onClose={() => setRequestModalOpen(false)}
             onSubmit={onCreateCoinRequest}
+            masterAgents={masterAgents}
           />
       )}
     </>

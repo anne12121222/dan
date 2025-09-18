@@ -1,3 +1,4 @@
+
 -- Grand Overhaul: This version is hardened, fully functional, and non-recursive.
 
 -- 1. CLEANUP: Drop old objects with specific function signatures to avoid ambiguity
@@ -27,6 +28,7 @@ DROP FUNCTION IF EXISTS public.place_bet(integer, integer, public.bet_choice) CA
 DROP FUNCTION IF EXISTS public.place_bet(bigint, integer, public.bet_choice) CASCADE;
 DROP FUNCTION IF EXISTS public.create_coin_request(numeric) CASCADE;
 DROP FUNCTION IF EXISTS public.create_coin_request(integer) CASCADE;
+DROP FUNCTION IF EXISTS public.create_coin_request(integer, uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status) CASCADE;
 DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric) CASCADE;
@@ -360,22 +362,37 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Coin Request Functions
-CREATE FUNCTION public.create_coin_request(p_amount integer)
+CREATE FUNCTION public.create_coin_request(p_amount integer, p_target_user_id uuid DEFAULT NULL)
 RETURNS text AS $$
 DECLARE
   current_user_profile public.profiles;
   target_user_id uuid;
+  target_user_role public.user_role;
 BEGIN
   SELECT * INTO current_user_profile FROM public.profiles WHERE id = auth.uid();
   
-  IF current_user_profile.role = 'PLAYER' THEN
-    target_user_id := current_user_profile.agent_id;
-  ELSIF current_user_profile.role = 'AGENT' THEN
-    target_user_id := current_user_profile.master_agent_id;
+  -- If a target is explicitly provided (Agent requesting from a specific Master Agent)
+  IF p_target_user_id IS NOT NULL THEN
+    -- Security check: Ensure agents are requesting from Master Agents
+    IF current_user_profile.role = 'AGENT' THEN
+      SELECT role INTO target_user_role FROM public.profiles WHERE id = p_target_user_id;
+      IF target_user_role != 'MASTER_AGENT' THEN
+        RETURN 'Error: Agents can only request coins from Master Agents.';
+      END IF;
+      target_user_id := p_target_user_id;
+    ELSE
+      RETURN 'Error: Specifying a request target is not allowed for your role.';
+    END IF;
+  -- If no target is provided, use the hierarchy (Player requesting from their Agent)
   ELSE
-    RETURN 'Error: Only Players and Agents can request coins.';
+    IF current_user_profile.role = 'PLAYER' THEN
+      target_user_id := current_user_profile.agent_id;
+    ELSE
+      -- Agents MUST now specify a target Master Agent.
+      RETURN 'Error: You must select a Master Agent to request coins from.';
+    END IF;
   END IF;
-  
+
   IF target_user_id IS NULL THEN
     RETURN 'Error: You do not have a superior to request coins from.';
   END IF;
@@ -390,6 +407,7 @@ RETURNS text AS $$
 DECLARE
   request public.coin_requests;
   responder_balance numeric;
+  requesting_user_profile public.profiles;
 BEGIN
   SELECT * INTO request FROM public.coin_requests WHERE id = p_request_id AND to_user_id = auth.uid();
   
@@ -407,9 +425,22 @@ BEGIN
         RETURN 'Error: Insufficient balance to approve this request.';
     END IF;
 
+    -- Transfer coins
     UPDATE public.profiles SET coin_balance = coin_balance - request.amount WHERE id = auth.uid();
     UPDATE public.profiles SET coin_balance = coin_balance + request.amount WHERE id = request.from_user_id;
     INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (auth.uid(), request.from_user_id, request.amount, 'TRANSFER');
+
+    -- NEW LOGIC: "Adopt" the agent if they don't have a master agent
+    SELECT * INTO requesting_user_profile FROM public.profiles WHERE id = request.from_user_id;
+    
+    -- Only Master Agents can adopt Agents
+    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'MASTER_AGENT' AND requesting_user_profile.role = 'AGENT' THEN
+      -- Only adopt if the agent doesn't already have a master. This prevents poaching.
+      IF requesting_user_profile.master_agent_id IS NULL THEN
+        UPDATE public.profiles SET master_agent_id = auth.uid() WHERE id = request.from_user_id;
+      END IF;
+    END IF;
+
   END IF;
   
   UPDATE public.coin_requests SET status = p_response WHERE id = p_request_id;
