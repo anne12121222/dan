@@ -95,7 +95,8 @@ export interface Transaction {
   to_user_id: string | null;
   amount: number;
   type: TransactionType;
-  timestamp: string;
+  // FIX: Renamed to match the database function's return value and avoid SQL keyword conflicts.
+  transaction_timestamp: string;
 }
 
 export interface Message {

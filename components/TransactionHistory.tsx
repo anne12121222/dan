@@ -45,7 +45,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ title, transact
                         <p className="font-semibold text-gray-300">
                             {getDescription()}
                         </p>
-                        <p className="text-xs text-gray-500">{new Date(tx.timestamp).toLocaleString()}</p>
+                        <p className="text-xs text-gray-500">{new Date(tx.transaction_timestamp).toLocaleString()}</p>
                     </div>
                     <span className={`font-bold ${isCredit ? 'text-green-400' : 'text-red-400'}`}>
                       {isCredit ? '+' : '-'}{tx.amount.toLocaleString()}

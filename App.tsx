@@ -5,7 +5,6 @@ import {
   FightResult, UpcomingFight, Bet, Transaction, CoinRequest, Message,
   PlayerFightHistoryEntry, Notification as NotificationType, FightWinner, BetChoice
 } from './types';
-import { ALL_USERS_BY_ID } from './users';
 import AuthView from './components/AuthView';
 import Header from './components/Header';
 import PlayerView from './components/PlayerView';
@@ -13,7 +12,7 @@ import AgentView from './components/AgentView';
 import MasterAgentView from './components/MasterAgentView';
 import OperatorView from './components/OperatorView';
 import NotificationComponent from './components/Notification';
-import { isSupabaseConfigured } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 import ChangePasswordModal from './components/ChangePasswordModal';
 
 
@@ -30,7 +29,7 @@ const FIGHT_TIMER_DURATION = 60; // 60 seconds for betting
 
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<AllUserTypes | null>(null);
-    const [allUsers, setAllUsers] = useState<{ [id: string]: AllUserTypes }>(ALL_USERS_BY_ID);
+    const [allUsers, setAllUsers] = useState<{ [id: string]: AllUserTypes }>({});
     
     // Global game state
     const [fightId, setFightId] = useState<number>(1);
@@ -52,45 +51,105 @@ const App: React.FC = () => {
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-    // --- MOCK API / Game Logic ---
     const showNotification = (message: string, type: 'success' | 'error') => {
         setNotification({ id: Date.now(), message, type });
     };
 
+    useEffect(() => {
+        if (!isSupabaseConfigured) return;
+
+        const fetchDataForUser = async (userId: string) => {
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (profileError || !profile) {
+                console.error('Error fetching profile:', profileError);
+                showNotification('Could not fetch your profile.', 'error');
+                await supabase.auth.signOut();
+                return;
+            }
+
+            const userProfile: AllUserTypes = {
+                id: profile.id, name: profile.name, email: profile.email, role: profile.role, coinBalance: profile.coin_balance,
+                ...(profile.role === UserRole.PLAYER && { agentId: profile.agent_id! }),
+                ...(profile.role === UserRole.AGENT && { masterAgentId: profile.master_agent_id!, commissionRate: 0.07, transferFee: 0.01 }),
+                ...(profile.role === UserRole.MASTER_AGENT && { commissionBalance: profile.commission_balance ?? 0, commissionRate: 0.07, transferFee: 0.01 }),
+            };
+            setCurrentUser(userProfile);
+
+            const { data: allUsersData, error: allUsersError } = await supabase.from('profiles').select('*');
+            if (allUsersError) {
+                console.error('Error fetching all users:', allUsersError);
+            } else {
+                const usersMap = allUsersData.reduce((acc, user) => {
+                    const mappedUser: AllUserTypes = {
+                        id: user.id, name: user.name, email: user.email, role: user.role, coinBalance: user.coin_balance,
+                        ...(user.role === UserRole.PLAYER && { agentId: user.agent_id! }),
+                        ...(user.role === UserRole.AGENT && { masterAgentId: user.master_agent_id!, commissionRate: 0.07, transferFee: 0.01 }),
+                        ...(user.role === UserRole.MASTER_AGENT && { commissionBalance: user.commission_balance ?? 0, commissionRate: 0.07, transferFee: 0.01 }),
+                    };
+                    acc[user.id] = mappedUser;
+                    return acc;
+                }, {} as { [id: string]: AllUserTypes });
+                setAllUsers(usersMap);
+            }
+        };
+
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session) {
+                fetchDataForUser(session.user.id);
+            }
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_IN' && session) {
+                fetchDataForUser(session.user.id);
+            } else if (event === 'SIGNED_OUT') {
+                setCurrentUser(null);
+                setAllUsers({});
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
     const handleLogin = async (email: string, password: string): Promise<string | null> => {
-        console.log(`Attempting login for: ${email}`);
-        // In a real app, this would be a call to Supabase auth
-        const user = Object.values(allUsers).find(u => u.email.toLowerCase() === email.toLowerCase());
-        if (user) {
-            setCurrentUser(user);
-            showNotification(`Welcome back, ${user.name}!`, 'success');
-            return null;
+        if (!isSupabaseConfigured) return "Supabase is not configured.";
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+            return error.message;
         }
-        return "Invalid email or password.";
+        showNotification(`Welcome back!`, 'success');
+        return null;
     };
     
     const handleRegister = async (name: string, email: string, password: string, agentId: string | null): Promise<string | null> => {
-        // Mock registration
-        if (Object.values(allUsers).some(u => u.email.toLowerCase() === email.toLowerCase())) {
-            return "An account with this email already exists.";
+        if (!isSupabaseConfigured) return "Supabase is not configured.";
+        const { error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: { name, agent_id: agentId, role: UserRole.PLAYER }
+            }
+        });
+        if (error) {
+            return error.message;
         }
-        const newPlayer: Player = {
-            id: `user-${Date.now()}`,
-            name, email,
-            role: UserRole.PLAYER,
-            agentId: agentId!,
-            coinBalance: 1000, // Starting balance
-        };
-        setAllUsers(prev => ({...prev, [newPlayer.id]: newPlayer }));
-        setCurrentUser(newPlayer);
-        showNotification('Registration successful! Welcome.', 'success');
+        showNotification('Registration successful! Check your email for verification.', 'success');
         return null;
     };
 
-
-    const handleLogout = () => {
-        setCurrentUser(null);
-        showNotification('You have been logged out.', 'success');
+    const handleLogout = async () => {
+        if (!isSupabaseConfigured) return;
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+            showNotification(`Error logging out: ${error.message}`, 'error');
+        } else {
+            showNotification('You have been logged out.', 'success');
+        }
     };
     
     const handleStartNextFight = useCallback(() => {
@@ -251,7 +310,11 @@ const App: React.FC = () => {
     };
     
     const onChangePassword = async (oldPassword: string, newPassword: string): Promise<string | null> => {
-        console.log("Changing password...", {oldPassword, newPassword});
+        if (!isSupabaseConfigured) return "Supabase is not configured.";
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        if (error) {
+            return error.message;
+        }
         showNotification("Password updated successfully.", 'success');
         return null;
     };
