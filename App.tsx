@@ -174,18 +174,48 @@ const App: React.FC = () => {
 
         const handleAuthChange = async (session: any) => {
              if (session?.user) {
+                // First, try to fetch the profile.
                 const { data: profile, error } = await supabase
                     .from('profiles')
                     .select('*')
                     .eq('id', session.user.id)
                     .single();
 
-                if (error || !profile) {
-                    console.error("Login failed: Could not find a user profile.", error);
+                if (profile) {
+                    // Profile exists, set the user.
+                    setCurrentUser(mapProfileToUserType(profile));
+                } else if (error && (error.code === 'PGRST116' || error.details.includes('0 rows'))) {
+                    // Profile does not exist (e.g., for a dashboard-created user).
+                    // This is our "self-healing" step.
+                    console.warn("User profile not found. Attempting to create one...");
+                    const { error: creationError } = await supabase.rpc('create_initial_profile');
+                    
+                    if (creationError) {
+                        console.error("Failed to create missing profile:", creationError);
+                        showNotification('Failed to initialize your profile. Please contact support.', 'error');
+                        await supabase.auth.signOut();
+                        setCurrentUser(null);
+                    } else {
+                        // Profile created successfully, now re-fetch it.
+                        const { data: newProfile, error: refetchError } = await supabase
+                            .from('profiles')
+                            .select('*')
+                            .eq('id', session.user.id)
+                            .single();
+                        if (refetchError || !newProfile) {
+                             console.error("Failed to re-fetch profile after creation:", refetchError);
+                             await supabase.auth.signOut();
+                             setCurrentUser(null);
+                        } else {
+                            setCurrentUser(mapProfileToUserType(newProfile));
+                            showNotification('Profile successfully initialized!', 'success');
+                        }
+                    }
+                } else {
+                    // Another type of error occurred.
+                    console.error("Error fetching profile:", error);
                     await supabase.auth.signOut();
                     setCurrentUser(null);
-                } else {
-                    setCurrentUser(mapProfileToUserType(profile));
                 }
             } else {
                 setCurrentUser(null);
@@ -248,20 +278,34 @@ const App: React.FC = () => {
     const handleRegister = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!isSupabaseConfigured || !supabase) return "Supabase is not configured.";
         
-        // The new, simplified, single-step registration.
-        // The database trigger will automatically handle creating the user's profile.
-        const { error } = await supabase.auth.signUp({
+        // Step 1: Create the user in auth.users
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
             email,
             password,
             options: {
                 data: {
-                    name: name
+                    name: name // Pass name as metadata for the RPC
                 }
             }
         });
 
-        if (error) {
-            return error.message;
+        if (signUpError) {
+            return signUpError.message;
+        }
+
+        if (!signUpData.user) {
+            return "Registration failed: user object not returned.";
+        }
+
+        // Step 2: As the new user, call the RPC to create their profile.
+        // The onAuthStateChange handler will pick up the session and log the user in.
+        const { error: profileError } = await supabase.rpc('create_initial_profile');
+        
+        if(profileError) {
+            // This is a critical failure. We should attempt to clean up.
+            console.error("CRITICAL: User was created in auth, but profile creation failed.", profileError);
+            // In a production app, you might want to call a serverless function here to delete the orphaned auth user.
+            return `Account created, but profile failed to initialize. Error: ${profileError.message}. Please contact support.`;
         }
 
         showNotification('Registration successful! Check your email for verification.', 'success');

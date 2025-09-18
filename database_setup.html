@@ -98,27 +98,9 @@ create table if not exists public.messages (
 );
 
 
--- 5. NEW USER TRIGGER (Replaces RPC call for robust profile creation)
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.profiles (id, name, email, role)
-  values (
-    new.id,
-    new.raw_user_meta_data->>'name',
-    new.email,
-    'PLAYER'::public.user_role -- All new signups default to Player
-  );
-  return new;
-end;
-$$ language plpgsql security definer;
-
--- Drop trigger if it exists to ensure a clean setup
-drop trigger if exists on_auth_user_created on auth.users;
--- Create the trigger to automatically create a profile when a new user signs up
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
+-- 5. REMOVED USER TRIGGER
+-- The old trigger `handle_new_user` and its binding to `auth.users` have been completely removed.
+-- Profile creation is now handled by an RPC call from the application.
 
 
 -- 6. ROW-LEVEL SECURITY (RLS)
@@ -134,6 +116,7 @@ alter table public.messages enable row level security;
 
 -- Drop existing policies to ensure a clean slate
 drop policy if exists "Enable all access for service_role" on public.profiles;
+drop policy if exists "Allow new users to create their own profile" on public.profiles;
 drop policy if exists "Allow users to read their own profile" on public.profiles;
 drop policy if exists "Allow users to update their own profile" on public.profiles;
 drop policy if exists "Allow public read access to all fights" on public.fights;
@@ -166,8 +149,13 @@ $$ language plpgsql stable security definer set search_path = '';
 
 -- PROFILES POLICIES
 create policy "Enable all access for service_role" on public.profiles for all to service_role using (true);
+create policy "Allow new users to create their own profile" on public.profiles for insert to authenticated with check (
+    auth.uid() = id and
+    (select count(*) from public.profiles where id = auth.uid()) = 0
+);
 create policy "Allow users to read their own profile" on public.profiles for select to authenticated using (auth.uid() = id);
 create policy "Allow users to update their own profile" on public.profiles for update to authenticated using (auth.uid() = id);
+
 
 -- FIGHTS & UPCOMING FIGHTS POLICIES
 create policy "Allow public read access to all fights" on public.fights for select using (true);
@@ -177,15 +165,15 @@ create policy "Allow public read access to upcoming fights" on public.upcoming_f
 create policy "Allow authenticated users to place bets" on public.bets for insert to authenticated with check (auth.uid() = user_id);
 create policy "Allow users to read their own bets" on public.bets for select using (auth.uid() = user_id);
 create policy "Agents can read their players bets" on public.bets for select using (
-  (select public.get_user_role(auth.uid())) = 'AGENT'::public.user_role and
+  (select public.get_user_role(auth.uid())) = 'AGENT' and
   (select agent_id from public.profiles where id = bets.user_id) = auth.uid()
 );
 create policy "Master Agents can read their agents players bets" on public.bets for select using (
-  (select public.get_user_role(auth.uid())) = 'MASTER_AGENT'::public.user_role and
+  (select public.get_user_role(auth.uid())) = 'MASTER_AGENT' and
   (select master_agent_id from public.profiles where id = (select agent_id from public.profiles where id = bets.user_id)) = auth.uid()
 );
 create policy "Operators can read all bets" on public.bets for select using (
-  (select public.get_user_role(auth.uid())) = 'OPERATOR'::public.user_role
+  (select public.get_user_role(auth.uid())) = 'OPERATOR'
 );
 
 -- TRANSACTIONS POLICIES
@@ -202,6 +190,25 @@ create policy "Allow users to send messages" on public.messages for insert with 
 
 
 -- 7. DATABASE FUNCTIONS
+
+-- NEW RPC FUNCTION FOR PROFILE CREATION
+create or replace function public.create_initial_profile()
+returns void as $$
+declare
+    v_name text;
+    v_email text;
+begin
+    -- Extract name from the JWT metadata, falling back to the email's local part
+    select 
+        coalesce(current_setting('request.jwt.claims', true)::jsonb->'raw_user_meta_data'->>'name', split_part(auth.jwt()->>'email', '@', 1)),
+        auth.jwt()->>'email'
+    into v_name, v_email;
+
+    insert into public.profiles (id, name, email, role)
+    values (auth.uid(), v_name, v_email, 'PLAYER');
+end;
+$$ language plpgsql security invoker;
+
 
 -- Internal helper functions (SECURITY DEFINER context)
 create or replace function internal_transfer_coins(
@@ -223,7 +230,7 @@ create or replace function internal_set_player_agent(
     p_agent_id uuid
 ) returns void as $$
 begin
-    update public.profiles set agent_id = p_agent_id where id = p_player_id and role = 'PLAYER'::public.user_role;
+    update public.profiles set agent_id = p_agent_id where id = p_player_id and role = 'PLAYER';
 end;
 $$ language plpgsql security definer set search_path = '';
 
@@ -240,22 +247,22 @@ declare
 begin
     select * into v_caller_profile from public.profiles where id = auth.uid();
     
-    if v_caller_profile.role = 'PLAYER'::public.user_role then
+    if v_caller_profile.role = 'PLAYER' then
         if v_caller_profile.agent_id is not null then
             v_final_target_id := v_caller_profile.agent_id;
         else
             if p_target_user_id is null then return 'Error: You must select an Agent to request coins from.'; end if;
             select * into v_target_profile from public.profiles where id = p_target_user_id;
-            if v_target_profile is null or v_target_profile.role <> 'AGENT'::public.user_role then return 'Error: Invalid Agent selected.'; end if;
+            if v_target_profile is null or v_target_profile.role <> 'AGENT' then return 'Error: Invalid Agent selected.'; end if;
             v_final_target_id := p_target_user_id;
         end if;
-    elsif v_caller_profile.role = 'AGENT'::public.user_role then
+    elsif v_caller_profile.role = 'AGENT' then
         if v_caller_profile.master_agent_id is not null then
              v_final_target_id := v_caller_profile.master_agent_id;
         else
              if p_target_user_id is null then return 'Error: You must select a Master Agent to request coins from.'; end if;
             select * into v_target_profile from public.profiles where id = p_target_user_id;
-            if v_target_profile is null or v_target_profile.role <> 'MASTER_AGENT'::public.user_role then return 'Error: Invalid Master Agent selected.'; end if;
+            if v_target_profile is null or v_target_profile.role <> 'MASTER_AGENT' then return 'Error: Invalid Master Agent selected.'; end if;
             v_final_target_id := p_target_user_id;
         end if;
     else
@@ -282,7 +289,7 @@ begin
 
     if v_request is null then return 'Error: Request not found.'; end if;
     if v_request.to_user_id <> auth.uid() then return 'Error: You are not authorized to respond to this request.'; end if;
-    if v_request.status <> 'PENDING'::public.request_status then return 'Error: This request has already been actioned.'; end if;
+    if v_request.status <> 'PENDING' then return 'Error: This request has already been actioned.'; end if;
 
     -- Now, lock the user profiles in a deterministic order (by UUID) to prevent deadlocks.
     if v_request.from_user_id < v_request.to_user_id then
@@ -293,13 +300,13 @@ begin
         select * into v_requester from public.profiles where id = v_request.from_user_id for update;
     end if;
 
-    if p_response = 'APPROVED'::public.request_status then
+    if p_response = 'APPROVED' then
         if v_responder.coin_balance < v_request.amount then return 'Error: Insufficient funds to approve this request.'; end if;
 
-        perform internal_transfer_coins(v_responder.id, v_requester.id, v_request.amount, 'TRANSFER'::public.transaction_type);
+        perform internal_transfer_coins(v_responder.id, v_requester.id, v_request.amount, 'TRANSFER');
 
         -- Adoption Logic: If an Agent approves a request from an unassigned player
-        if v_responder.role = 'AGENT'::public.user_role and v_requester.role = 'PLAYER'::public.user_role and v_requester.agent_id is null then
+        if v_responder.role = 'AGENT' and v_requester.role = 'PLAYER' and v_requester.agent_id is null then
             perform internal_set_player_agent(v_requester.id, v_responder.id);
         end if;
     end if;
@@ -322,24 +329,21 @@ declare
 begin
     select * into v_caller_profile from public.profiles where public.profiles.id = auth.uid();
     
-    if v_caller_profile.role = 'OPERATOR'::public.user_role then
+    if v_caller_profile.role = 'OPERATOR' then
         return query select p.* from public.profiles p;
-    elsif v_caller_profile.role = 'MASTER_AGENT'::public.user_role then
+    elsif v_caller_profile.role = 'MASTER_AGENT' then
         return query select p.* from public.profiles p where p.master_agent_id = v_caller_profile.id or p.id = v_caller_profile.id;
-    elsif v_caller_profile.role = 'AGENT'::public.user_role then
-        -- Agent sees their players, themself, their master agent, and other master agents if they are unassigned
+    elsif v_caller_profile.role = 'AGENT' then
         return query 
             select p.* from public.profiles p 
-            where p.agent_id = v_caller_profile.id -- their players
-            or p.id = v_caller_profile.id -- themself
-            or p.id = v_caller_profile.master_agent_id -- their master agent
-            or (v_caller_profile.master_agent_id is null and p.role = 'MASTER_AGENT'::public.user_role); -- all master agents if unassigned
-    elsif v_caller_profile.role = 'PLAYER'::public.user_role then
+            where p.agent_id = v_caller_profile.id 
+            or p.id = v_caller_profile.id 
+            or p.id = v_caller_profile.master_agent_id 
+            or (v_caller_profile.master_agent_id is null and p.role = 'MASTER_AGENT');
+    elsif v_caller_profile.role = 'PLAYER' then
         if v_caller_profile.agent_id is null then
-            -- Unassigned player can see all agents to make a request, plus themself
-            return query select p.* from public.profiles p where p.role = 'AGENT'::public.user_role or p.id = v_caller_profile.id;
+            return query select p.* from public.profiles p where p.role = 'AGENT' or p.id = v_caller_profile.id;
         else
-            -- Assigned player sees themself and their agent
             return query select p.* from public.profiles p where p.id = v_caller_profile.agent_id or p.id = v_caller_profile.id;
         end if;
     end if;
@@ -417,7 +421,6 @@ declare
     v_sender_id uuid := auth.uid();
 begin
     if p_amount > 0 then
-        -- Lock profiles in a deterministic order to prevent deadlocks
         if v_sender_id < p_receiver_id then
             select * into v_sender_profile from public.profiles where id = v_sender_id for update;
             select * into v_receiver_profile from public.profiles where id = p_receiver_id for update;
@@ -433,11 +436,9 @@ begin
             return 'Error: Insufficient funds.';
         end if;
         
-        -- Perform transfer using the secure helper function
-        perform internal_transfer_coins(v_sender_id, p_receiver_id, p_amount, 'TRANSFER'::public.transaction_type);
+        perform internal_transfer_coins(v_sender_id, p_receiver_id, p_amount, 'TRANSFER');
     end if;
 
-    -- Insert message, ensuring text is not empty
     if p_text is not null and p_text <> '' then
         insert into public.messages (sender_id, receiver_id, text, amount)
         values (v_sender_id, p_receiver_id, p_text, p_amount);
@@ -458,7 +459,6 @@ declare
     v_fight public.fights;
     v_player public.profiles;
 begin
-    -- Lock the player's profile first to prevent race conditions on their balance
     select * into v_player from public.profiles where id = auth.uid() for update;
     
     if v_player.coin_balance < p_amount then
@@ -471,7 +471,7 @@ begin
         return 'Error: Fight not found.';
     end if;
     
-    if v_fight.status <> 'BETTING_OPEN'::public.fight_status then
+    if v_fight.status <> 'BETTING_OPEN' then
         return 'Error: Betting is closed for this fight.';
     end if;
 
@@ -479,14 +479,11 @@ begin
         return 'Error: You have already placed a bet on this fight.';
     end if;
 
-    -- Decrease balance
     update public.profiles set coin_balance = coin_balance - p_amount where id = auth.uid();
     
-    -- Record transaction
     insert into public.transactions (from_user_id, to_user_id, amount, type)
-    values (auth.uid(), null, p_amount, 'BET_PLACE'::public.transaction_type);
+    values (auth.uid(), null, p_amount, 'BET_PLACE');
 
-    -- Insert bet
     insert into public.bets (user_id, fight_id, amount, choice)
     values (auth.uid(), p_fight_id, p_amount, p_choice);
 

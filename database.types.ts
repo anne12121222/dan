@@ -290,6 +290,10 @@ export interface Database {
         Args: { p_amount: number; p_target_user_id?: string | null }
         Returns: string
       }
+      create_initial_profile: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
       declare_winner: {
         Args: { p_fight_id: number; p_winner_text: string }
         Returns: undefined
