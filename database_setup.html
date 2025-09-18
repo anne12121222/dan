@@ -24,12 +24,16 @@ DROP FUNCTION IF EXISTS public.create_coin_request(numeric) CASCADE;
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status) CASCADE;
 DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric) CASCADE;
-
+DROP FUNCTION IF EXISTS public.get_transactions_for_user() CASCADE;
+DROP FUNCTION IF EXISTS public.get_coin_requests_for_user() CASCADE;
+DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
+DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
+DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
+DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
 -- Drop the new helper functions if they exist from a previous run
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
-DROP FUNCTION IF EXISTS public.get_my_role() CASCADE;
 
 
 -- 2. TYPES: Define custom data types
@@ -104,13 +108,6 @@ CREATE TABLE public.messages (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Add indexes for performance on RLS and queries
-CREATE INDEX ON public.profiles (agent_id);
-CREATE INDEX ON public.profiles (master_agent_id);
-CREATE INDEX ON public.transactions (from_user_id);
-CREATE INDEX ON public.transactions (to_user_id);
-
-
 -- 4. RLS HELPER FUNCTIONS (NON-RECURSIVE)
 -- These functions safely get the current user's data to avoid recursion in RLS policies.
 CREATE FUNCTION public.get_my_agent_id()
@@ -124,13 +121,6 @@ CREATE FUNCTION public.get_my_master_agent_id()
 RETURNS uuid AS $$
 BEGIN
   RETURN (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid());
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-CREATE FUNCTION public.get_my_role()
-RETURNS public.user_role AS $$
-BEGIN
-  RETURN (SELECT role FROM public.profiles WHERE id = auth.uid());
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
@@ -174,34 +164,9 @@ CREATE POLICY "Allow operators to see all bets" ON public.bets FOR SELECT
 USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
 -- Other policies for authenticated users
-CREATE POLICY "Allow hierarchical read access to transactions" ON public.transactions FOR SELECT
-USING (
-  -- 1. A user can see their own transactions
-  (from_user_id = auth.uid() OR to_user_id = auth.uid())
-  OR
-  -- 2. An agent/master can see transactions of their direct subordinates.
-  (
-    public.get_my_role() IN ('AGENT', 'MASTER_AGENT') AND
-    (
-      EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = from_user_id AND (p.agent_id = auth.uid() OR p.master_agent_id = auth.uid()))
-      OR
-      EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = to_user_id AND (p.agent_id = auth.uid() OR p.master_agent_id = auth.uid()))
-    )
-  )
-  OR
-  -- 3. An operator can see all transactions
-  (public.get_my_role() = 'OPERATOR')
-);
-
+CREATE POLICY "Allow users to see their own data" ON public.transactions FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own data" ON public.coin_requests FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
-
--- FIX: Replace generic 'FOR ALL' policy with specific, more secure policies.
--- Allow users to see messages they are a part of.
-CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT
-USING (sender_id = auth.uid() OR receiver_id = auth.uid());
--- Allow users to send messages only as themselves.
-CREATE POLICY "Allow users to send messages as themselves" ON public.messages FOR INSERT
-WITH CHECK (sender_id = auth.uid());
+CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT USING (sender_id = auth.uid() OR receiver_id = auth.uid());
 
 -- NOTE: The dangerous recursive operator policy on profiles has been removed.
 -- The app correctly uses an RPC call (`get_all_users_for_operator`) for this functionality.
@@ -295,7 +260,6 @@ DECLARE
   master_agent_profile public.profiles;
   operator_id uuid;
 BEGIN
-  -- NOTE: This function has been fixed to implement a sustainable commission model.
   -- Check if user is an operator
   operator_id := auth.uid();
   IF (SELECT role FROM public.profiles WHERE id = operator_id) != 'OPERATOR' THEN
@@ -318,57 +282,39 @@ BEGIN
   SELECT SUM(amount) INTO total_pool FROM public.bets WHERE fight_id = p_fight_id;
   SELECT SUM(amount) INTO winning_pool FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice;
   
-  IF winning_pool IS NULL OR winning_pool = 0 OR total_pool IS NULL OR total_pool = 0 THEN
-    RETURN; -- No bets or no winning bets, nothing to pay out.
+  IF winning_pool IS NULL OR winning_pool = 0 THEN
+    RETURN; -- No winning bets, nothing to pay out
   END IF;
   
   payout_ratio := total_pool / winning_pool;
 
   -- Payout winners and calculate commissions
-  FOR winning_bet IN 
-    SELECT b.*, p.agent_id 
-    FROM public.bets b 
-    JOIN public.profiles p ON b.user_id = p.id
-    WHERE b.fight_id = p_fight_id AND b.choice = p_winner::text::public.bet_choice 
-  LOOP
-    -- Calculate gross profit for the player
+  FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice LOOP
+    -- Payout the winner
     player_profit := (winning_bet.amount * payout_ratio) - winning_bet.amount;
+    UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount + player_profit WHERE id = winning_bet.user_id;
+    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, winning_bet.user_id, winning_bet.amount + player_profit, 'BET_WIN');
     
-    -- Initialize commissions for this specific win to zero
-    agent_commission := 0;
-    master_commission := 0;
-
-    -- Calculate and distribute commissions if the player has an agent
-    IF winning_bet.agent_id IS NOT NULL THEN
-      SELECT * INTO agent_profile FROM public.profiles WHERE id = winning_bet.agent_id;
+    -- Calculate and distribute commission
+    SELECT * INTO agent_profile FROM public.profiles WHERE id = (SELECT agent_id FROM public.profiles WHERE id = winning_bet.user_id);
+    IF agent_profile IS NOT NULL THEN
+      agent_commission := player_profit * agent_profile.commission_rate;
+      UPDATE public.profiles SET commission_balance = commission_balance + agent_commission WHERE id = agent_profile.id;
+      INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, agent_profile.id, agent_commission, 'COMMISSION');
+      total_commission := total_commission + agent_commission;
       
-      -- Check if agent profile was found and has a commission rate
-      IF FOUND AND agent_profile.commission_rate > 0 THEN
-        agent_commission := player_profit * agent_profile.commission_rate;
-        UPDATE public.profiles SET commission_balance = commission_balance + agent_commission WHERE id = agent_profile.id;
-        INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, agent_profile.id, agent_commission, 'COMMISSION');
-        
-        -- Check if the agent has a master agent
-        IF agent_profile.master_agent_id IS NOT NULL THEN
-          SELECT * INTO master_agent_profile FROM public.profiles WHERE id = agent_profile.master_agent_id;
-          
-          -- Check if master agent profile was found and has a commission rate
-          IF FOUND AND master_agent_profile.commission_rate > 0 THEN
-            master_commission := player_profit * master_agent_profile.commission_rate;
-            UPDATE public.profiles SET commission_balance = commission_balance + master_commission WHERE id = master_agent_profile.id;
-            INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, master_agent_profile.id, master_commission, 'COMMISSION');
-          END IF;
-        END IF;
+      SELECT * INTO master_agent_profile FROM public.profiles WHERE id = agent_profile.master_agent_id;
+      IF master_agent_profile IS NOT NULL THEN
+        master_commission := player_profit * master_agent_profile.commission_rate;
+        UPDATE public.profiles SET commission_balance = commission_balance + master_commission WHERE id = master_agent_profile.id;
+        INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, master_agent_profile.id, master_commission, 'COMMISSION');
+        total_commission := total_commission + master_commission;
       END IF;
     END IF;
-    
-    -- Payout the winner their stake + profit, minus the commissions paid on their behalf
-    UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount + player_profit - agent_commission - master_commission WHERE id = winning_bet.user_id;
-    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, winning_bet.user_id, winning_bet.amount + player_profit, 'BET_WIN');
-    total_commission := total_commission + agent_commission + master_commission;
   END LOOP;
   
-  -- Record the total commission generated by this fight. The operator's balance is no longer debited.
+  -- Update operator balance and fight commission record
+  UPDATE public.profiles SET coin_balance = coin_balance - total_commission WHERE id = operator_id;
   UPDATE public.fights SET commission = total_commission WHERE id = p_fight_id;
 END;
 $$ LANGUAGE plpgsql;
@@ -532,10 +478,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Data Fetching Functions
+CREATE FUNCTION public.get_transactions_for_user()
+RETURNS TABLE(id uuid, from_user_id uuid, to_user_id uuid, amount numeric, type public.transaction_type, transaction_timestamp timestamptz) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT t.id, t.from_user_id, t.to_user_id, t.amount, t.type, t.transaction_timestamp
+  FROM public.transactions t
+  WHERE t.from_user_id = auth.uid() OR t.to_user_id = auth.uid()
+  ORDER BY t.transaction_timestamp DESC;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION public.get_coin_requests_for_user()
+RETURNS TABLE(id uuid, from_user_id uuid, to_user_id uuid, amount numeric, status public.request_status, created_at timestamptz) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT r.id, r.from_user_id, r.to_user_id, r.amount, r.status, r.created_at
+  FROM public.coin_requests r
+  WHERE r.from_user_id = auth.uid() OR r.to_user_id = auth.uid();
+END;
+$$ LANGUAGE plpgsql;
+
 -- A new secure function for operators to fetch all user data.
 -- This prevents the recursive RLS issue for other user roles.
 CREATE FUNCTION public.get_all_users_for_operator()
-RETURNS TABLE(id uuid, name text, email text, role public.user_role, coin_balance numeric, commission_balance numeric, commission_rate numeric, transfer_fee numeric, agent_id uuid, master_agent_id uuid) AS $$
+RETURNS TABLE(id uuid, name text, email text, role public.user_role, coin_balance numeric, commission_balance numeric, commission_rate numeric, transfer_fee numeric, agent_id uuid, master_agent_id uuid) 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public
+AS $$
 BEGIN
   IF (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid()) != 'OPERATOR' THEN
     RAISE EXCEPTION 'Only operators can call this function.';
@@ -543,21 +515,74 @@ BEGIN
   
   RETURN QUERY SELECT p.id, p.name, p.email, p.role, p.coin_balance, p.commission_balance, p.commission_rate, p.transfer_fee, p.agent_id, p.master_agent_id FROM public.profiles p;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-ALTER FUNCTION public.get_all_users_for_operator() SET search_path = public;
+$$;
 
 
+-- User Creation Functions
+CREATE OR REPLACE FUNCTION public.create_agent(p_name text, p_email text, p_password text)
+RETURNS text 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public
+AS $$
+DECLARE
+  new_user_id uuid;
+BEGIN
+  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'MASTER_AGENT' THEN
+    RETURN 'Error: Only Master Agents can create Agents.';
+  END IF;
+  -- Create the user in auth.users
+  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'AGENT', 'master_agent_id', auth.uid())) INTO new_user_id;
+  RETURN 'Agent ' || p_name || ' created successfully.';
+END;
+$$;
 
+CREATE OR REPLACE FUNCTION public.create_master_agent(p_name text, p_email text, p_password text)
+RETURNS text 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public
+AS $$
+DECLARE
+  new_user_id uuid;
+BEGIN
+  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
+    RETURN 'Error: Only Operators can create Master Agents.';
+  END IF;
+  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')) INTO new_user_id;
+  RETURN 'Master Agent ' || p_name || ' created successfully.';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
+RETURNS text 
+LANGUAGE plpgsql 
+SECURITY DEFINER 
+SET search_path = public
+AS $$
+DECLARE
+  new_user_id uuid;
+BEGIN
+  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'MASTER_AGENT' THEN
+    RETURN 'Error: Only Master Agents can create Operators.';
+  END IF;
+  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'OPERATOR')) INTO new_user_id;
+  RETURN 'Operator ' || p_name || ' created successfully.';
+END;
+$$;
 
 
 -- Function for registration form
 CREATE OR REPLACE FUNCTION public.get_registerable_agents()
-RETURNS TABLE(id uuid, name text) AS $$
+RETURNS TABLE(id uuid, name text) 
+LANGUAGE plpgsql 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN QUERY
   SELECT p.id, p.name FROM public.profiles p WHERE p.role = 'AGENT';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-ALTER FUNCTION public.get_registerable_agents() SET search_path = public;
+$$;
 -- Grant execute permission to the anon role so they can see agents on signup
 GRANT EXECUTE ON FUNCTION public.get_registerable_agents() TO anon;

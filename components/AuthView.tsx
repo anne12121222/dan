@@ -86,7 +86,7 @@ const AuthForm: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConf
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-300">Password</label>
+            <label htmlFor="password"className="block text-sm font-medium text-gray-300">Password</label>
             <input id="password" name="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md shadow-sm placeholder-gray-400 text-white focus:outline-none focus:ring-red-500 focus:border-red-500"/>
           </div>

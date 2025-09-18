@@ -61,14 +61,10 @@ const App: React.FC = () => {
 
     const mapProfileToUserType = (profile: any): AllUserTypes => {
         const user: AllUserTypes = {
-            id: profile.id, 
-            name: profile.name, 
-            email: profile.email, 
-            role: profile.role, 
-            coinBalance: profile.coin_balance || 0,
-            commissionBalance: profile.commission_balance || 0,
-            commissionRate: profile.commission_rate || 0,
-            transferFee: profile.transfer_fee || 0,
+            id: profile.id, name: profile.name, email: profile.email, role: profile.role, coinBalance: profile.coin_balance,
+            commissionBalance: profile.commission_balance,
+            commissionRate: profile.commission_rate,
+            transferFee: profile.transfer_fee,
             ...(profile.role === UserRole.PLAYER && { agentId: profile.agent_id! }),
             ...(profile.role === UserRole.AGENT && { masterAgentId: profile.master_agent_id! }),
         };
@@ -78,186 +74,111 @@ const App: React.FC = () => {
     const refreshAllData = useCallback(async () => {
         if (!supabase || !currentUser) return;
         
-        try {
-            // Fetch all users/profiles with better error handling
-            let profilesData;
-            let profilesError;
-            
-            if (currentUser.role === UserRole.OPERATOR) {
-                try {
-                    const { data, error } = await supabase.rpc('get_all_users_for_operator');
-                    profilesData = data;
-                    profilesError = error;
-                } catch (rpcError) {
-                    console.warn("RPC function 'get_all_users_for_operator' failed, falling back to direct query", rpcError);
-                    const { data, error } = await supabase.from('profiles').select('*');
-                    profilesData = data;
-                    profilesError = error;
-                }
-            } else {
-                const { data, error } = await supabase.from('profiles').select('*');
-                profilesData = data;
-                profilesError = error;
-            }
-            
-            if (profilesError) {
-                console.error("Error fetching profiles:", profilesError);
-            } else if (profilesData) {
-                const usersMap = profilesData.reduce((acc, p) => {
-                    acc[p.id] = mapProfileToUserType(p);
-                    return acc;
-                }, {} as { [id: string]: AllUserTypes });
-                setAllUsers(usersMap);
-                // Also refresh current user's data from the new map
-                if (usersMap[currentUser.id]) {
-                    setCurrentUser(usersMap[currentUser.id]);
-                }
-            }
-            
-            // Fetch current fight state with error handling
-            try {
-                const { data: currentFight, error: currentFightError } = await supabase
-                    .from('fights')
-                    .select('*')
-                    .order('id', { ascending: false })
-                    .limit(1)
-                    .single();
-                
-                if (currentFightError && currentFightError.code !== 'PGRST116') { // Ignore "Row not found" error
-                    console.error('Error fetching current fight state:', currentFightError);
-                } else if (currentFight) {
-                    setFightId(currentFight.id);
-                    setFightStatus(currentFight.status);
-                    setLastWinner(currentFight.winner);
-
-                    // Fetch bets for the current fight
-                    const { data: betsData, error: betsError } = await supabase.from('bets').select('*').eq('fight_id', currentFight.id);
-                    if (betsError) {
-                        console.error('Error fetching bets:', betsError);
-                    } else {
-                        setCurrentBets(betsData || []);
-                        const newPools = (betsData || []).reduce((acc, bet) => {
-                            if (bet.choice === 'RED') acc.meron += bet.amount;
-                            if (bet.choice === 'WHITE') acc.wala += bet.amount;
-                            return acc;
-                        }, { meron: 0, wala: 0 });
-                        setPools(newPools);
-                    }
-                } else {
-                    setFightId(null);
-                }
-            } catch (fightError) {
-                console.error('Error in fight data fetching:', fightError);
-            }
-
-            // Fetch fight history with error handling
-            try {
-                const { data: historyData, error: historyError } = await supabase.from('fights').select('*').order('created_at', { ascending: false }).limit(50);
-                if (historyError) {
-                    console.error('Error fetching fight history:', historyError);
-                } else {
-                    setFightHistory(historyData || []);
-                }
-            } catch (historyError) {
-                console.error('Error in fight history fetching:', historyError);
-            }
-
-            // Fetch upcoming fights with error handling
-            try {
-                const { data: upcomingData, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
-                if (upcomingError) {
-                    console.error('Error fetching upcoming fights:', upcomingError);
-                } else {
-                    setUpcomingFights((upcomingData || []).map(uf => ({ ...uf, participants: uf.participants as any })));
-                }
-            } catch (upcomingError) {
-                console.error('Error in upcoming fights fetching:', upcomingError);
-            }
-
-            // Fetch user-specific data with error handling
-            try {
-                const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
-                if(txsError) {
-                    console.error("Error fetching transactions:", txsError);
-                } else {
-                    setTransactions(txs || []);
-                }
-            } catch (txError) {
-                console.error("RPC error fetching transactions:", txError);
-                setTransactions([]);
-            }
-
-            try {
-                const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
-                if(reqsError) {
-                    console.error("Error fetching coin requests:", reqsError);
-                } else {
-                    setCoinRequests(reqs || []);
-                }
-            } catch (reqError) {
-                console.error("RPC error fetching coin requests:", reqError);
-                setCoinRequests([]);
-            }
-            
-            if (currentUser.role === UserRole.PLAYER) {
-                try {
-                    const { data: allMyBets, error: betsError } = await supabase.from('bets').select('*').eq('user_id', currentUser.id);
-                    if(betsError) {
-                        console.error("Error fetching player bets:", betsError);
-                    } else {
-                        setPlayerBets(allMyBets || []);
-                    }
-                } catch (betError) {
-                    console.error("Error in player bets fetching:", betError);
-                }
-            }
-
-            // FIX: Also refresh messages for the currently open chat window to ensure real-time updates.
-            if (chatTargetUser) {
-                try {
-                    const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: chatTargetUser.id });
-                    if (error) {
-                        console.error(`Failed to refresh messages for ${chatTargetUser.name}`, error);
-                    } else {
-                        setAllMessages(prev => ({...prev, [chatTargetUser.id]: (data || []).map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
-                    }
-                } catch (msgError) {
-                    console.error("RPC error fetching messages:", msgError);
-                }
-            }
-        } catch (globalError) {
-            console.error("Global error in refreshAllData:", globalError);
+        // Fetch all users/profiles
+        let profilesData;
+        let profilesError;
+        
+        if (currentUser.role === UserRole.OPERATOR) {
+            const { data, error } = await supabase.rpc('get_all_users_for_operator');
+            profilesData = data;
+            profilesError = error;
+        } else {
+            const { data, error } = await supabase.from('profiles').select('*');
+            profilesData = data;
+            profilesError = error;
         }
+        
+        if (profilesError) console.error("Error fetching profiles:", profilesError);
+        else if (profilesData){
+            const usersMap = profilesData.reduce((acc, p) => {
+                acc[p.id] = mapProfileToUserType(p);
+                return acc;
+            }, {} as { [id: string]: AllUserTypes });
+            setAllUsers(usersMap);
+            // Also refresh current user's data from the new map
+             if (usersMap[currentUser.id]) {
+                setCurrentUser(usersMap[currentUser.id]);
+            }
+        }
+        
+        // Fetch current fight state
+        const { data: currentFight, error: currentFightError } = await supabase
+            .from('fights')
+            .select('*')
+            .order('id', { ascending: false })
+            .limit(1)
+            .single();
+        
+        if (currentFightError && currentFightError.code !== 'PGRST116') { // Ignore "Row not found" error
+            console.error('Error fetching current fight state:', currentFightError);
+        } else if (currentFight) {
+            setFightId(currentFight.id);
+            setFightStatus(currentFight.status);
+            setLastWinner(currentFight.winner);
+
+            // Fetch bets for the current fight
+            const { data: betsData, error: betsError } = await supabase.from('bets').select('*').eq('fight_id', currentFight.id);
+            if (betsError) console.error('Error fetching bets:', betsError);
+            else {
+                setCurrentBets(betsData);
+                const newPools = betsData.reduce((acc, bet) => {
+                    if (bet.choice === 'RED') acc.meron += bet.amount;
+                    if (bet.choice === 'WHITE') acc.wala += bet.amount;
+                    return acc;
+                }, { meron: 0, wala: 0 });
+                setPools(newPools);
+            }
+        } else {
+             setFightId(null);
+        }
+
+        // Fetch fight history
+        const { data: historyData, error: historyError } = await supabase.from('fights').select('*').order('created_at', { ascending: false }).limit(50);
+        if (historyError) console.error('Error fetching fight history:', historyError);
+        else setFightHistory(historyData);
+
+        // Fetch upcoming fights
+        const { data: upcomingData, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+        if (upcomingError) console.error('Error fetching upcoming fights:', upcomingError);
+        else setUpcomingFights(upcomingData.map(uf => ({ ...uf, participants: uf.participants as any })));
+
+        // Fetch user-specific data
+        const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
+        if(txsError) console.error("Error fetching transactions:", txsError);
+        else setTransactions(txs);
+
+        const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
+        if(reqsError) console.error("Error fetching coin requests:", reqsError);
+        else setCoinRequests(reqs);
+        
+        if (currentUser.role === UserRole.PLAYER) {
+            const { data: allMyBets, error: betsError } = await supabase.from('bets').select('*').eq('user_id', currentUser.id);
+            if(betsError) console.error("Error fetching player bets:", betsError)
+            else setPlayerBets(allMyBets);
+        }
+
+        // FIX: Also refresh messages for the currently open chat window to ensure real-time updates.
+        if (chatTargetUser) {
+            const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: chatTargetUser.id });
+            if (error) {
+                 console.error(`Failed to refresh messages for ${chatTargetUser.name}`, error);
+            } else {
+                setAllMessages(prev => ({...prev, [chatTargetUser.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
+            }
+        }
+
     }, [currentUser, chatTargetUser]);
 
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
             if (!isSupabaseConfigured || !supabase) return;
-            
-            try {
-                // Fetch agents from the new secure RPC function
-                const { data, error } = await supabase.rpc('get_registerable_agents');
+            // Fetch agents from the new secure RPC function
+            const { data, error } = await supabase.rpc('get_registerable_agents');
 
-                if (error) {
-                    console.error("Error fetching agents for registration:", error.message || error);
-                    // Fallback: try to fetch agents directly from profiles table
-                    const { data: fallbackData, error: fallbackError } = await supabase
-                        .from('profiles')
-                        .select('id, name')
-                        .eq('role', 'AGENT');
-                    
-                    if (fallbackError) {
-                        console.error("Fallback agent fetch also failed:", fallbackError);
-                        setRegisterableAgents([]);
-                    } else {
-                        setRegisterableAgents(fallbackData || []);
-                    }
-                } else if (data) {
-                    setRegisterableAgents(data);
-                }
-            } catch (agentError) {
-                console.error("Exception in fetchAgentsForRegistration:", agentError);
-                setRegisterableAgents([]);
+            if (error) {
+                console.error("Error fetching agents for registration:", error.message || error);
+            } else if (data) {
+                setRegisterableAgents(data);
             }
         };
         fetchAgentsForRegistration();
@@ -271,66 +192,20 @@ const App: React.FC = () => {
         }
 
         const handleAuthChange = async (session: any) => {
-            if (session?.user) {
-                try {
-                    const { data: profile, error } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', session.user.id)
-                        .single();
+             if (session?.user) {
+                const { data: profile, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', session.user.id)
+                    .single();
 
-                    if (error || !profile) {
-                        console.error("Login failed: Could not find a user profile.", error);
-                        
-                        // Check if this is a new user that needs a profile created
-                        if (error?.code === 'PGRST116') {
-                            // Try to create a profile from auth metadata
-                            const userData = session.user.user_metadata;
-                            if (userData && userData.name) {
-                                try {
-                                    const { data: newProfile, error: createError } = await supabase
-                                        .from('profiles')
-                                        .insert({
-                                            id: session.user.id,
-                                            name: userData.name,
-                                            email: session.user.email,
-                                            role: userData.role || UserRole.PLAYER,
-                                            agent_id: userData.agent_id || null,
-                                            coin_balance: 0,
-                                            commission_balance: 0,
-                                            commission_rate: 0,
-                                            transfer_fee: 0
-                                        })
-                                        .select()
-                                        .single();
-                                
-                                if (createError) {
-                                    console.error("Failed to create profile:", createError);
-                                    showNotification("Failed to create user profile. Please contact administrator.", 'error');
-                                    await supabase.auth.signOut();
-                                    setCurrentUser(null);
-                                } else {
-                                    console.log("Profile created successfully:", newProfile);
-                                    setCurrentUser(mapProfileToUserType(newProfile));
-                                }
-                            } else {
-                                showNotification("User profile data is incomplete. Please contact administrator.", 'error');
-                                await supabase.auth.signOut();
-                                setCurrentUser(null);
-                            }
-                        } else {
-                            showNotification("Login failed: Your user profile could not be loaded.", 'error');
-                            await supabase.auth.signOut();
-                            setCurrentUser(null);
-                        }
-                    } else {
-                        setCurrentUser(mapProfileToUserType(profile));
-                    }
-                } catch (authError) {
-                    console.error("Exception in auth handling:", authError);
-                    showNotification("Authentication error occurred. Please try again.", 'error');
+                if (error || !profile) {
+                    console.error("Login failed: Could not find a user profile.", error);
+                    showNotification("Login failed: Your user profile could not be loaded.", 'error');
                     await supabase.auth.signOut();
                     setCurrentUser(null);
+                } else {
+                    setCurrentUser(mapProfileToUserType(profile));
                 }
             } else {
                 setCurrentUser(null);
@@ -385,32 +260,20 @@ const App: React.FC = () => {
 
     const handleLogin = async (email: string, password: string): Promise<string | null> => {
         if (!isSupabaseConfigured) return "Supabase is not configured.";
-        
-        try {
-            const { error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) return error.message;
-            return null;
-        } catch (loginError) {
-            console.error("Login exception:", loginError);
-            return "Login failed due to network error. Please try again.";
-        }
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return error.message;
+        return null;
     };
     
     const handleRegister = async (name: string, email: string, password: string, agentId: string | null): Promise<string | null> => {
         if (!isSupabaseConfigured) return "Supabase is not configured.";
-        
-        try {
-            const { error } = await supabase.auth.signUp({
-                email, password,
-                options: { data: { name, agent_id: agentId, role: UserRole.PLAYER } }
-            });
-            if (error) return error.message;
-            showNotification('Registration successful! Check your email for verification.', 'success');
-            return null;
-        } catch (registerError) {
-            console.error("Registration exception:", registerError);
-            return "Registration failed due to network error. Please try again.";
-        }
+        const { error } = await supabase.auth.signUp({
+            email, password,
+            options: { data: { name, agent_id: agentId, role: UserRole.PLAYER } }
+        });
+        if (error) return error.message;
+        showNotification('Registration successful! Check your email for verification.', 'success');
+        return null;
     };
 
     const handleLogout = async () => {
@@ -501,7 +364,7 @@ const App: React.FC = () => {
         if (error) {
             handleRpcError(error, `Failed to fetch messages for ${targetUser.name}`);
         } else {
-            setAllMessages(prev => ({...prev, [targetUser.id]: (data || []).map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
+            setAllMessages(prev => ({...prev, [targetUser.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
         }
     };
     
@@ -575,26 +438,20 @@ const App: React.FC = () => {
                     />
                 );
             case UserRole.AGENT:
-                const agentPlayers = Object.values(allUsers).filter((u: AllUserTypes): u is Player => 
-                    u.role === UserRole.PLAYER && (u as Player).agentId === currentUser.id
-                );
                 return (
                     <AgentView
                         currentUser={currentUser as Agent}
-                        players={agentPlayers}
+                        players={Object.values(allUsers).filter(u => u.role === UserRole.PLAYER && u.agentId === currentUser.id) as Player[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
                         onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage} 
                         messages={allMessages} allUsers={allUsers} onOpenChat={handleOpenChat} chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
                     />
                 );
             case UserRole.MASTER_AGENT:
-                const masterAgentAgents = Object.values(allUsers).filter((u: AllUserTypes): u is Agent => 
-                    u.role === UserRole.AGENT && (u as Agent).masterAgentId === currentUser.id
-                );
                  return (
                     <MasterAgentView
                         currentUser={currentUser as MasterAgent}
-                        agents={masterAgentAgents}
+                        agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT && u.masterAgentId === currentUser.id) as Agent[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
                         onRespondToRequest={onRespondToRequest} onSendMessage={onSendMessage}
                         messages={allMessages} allUsers={allUsers} onCreateAgent={handleCreateAgent} onOpenChat={handleOpenChat}
