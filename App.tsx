@@ -418,9 +418,11 @@ const App: React.FC = () => {
                         currentUser={currentUser as MasterAgent}
                         agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT && u.masterAgentId === currentUser.id) as Agent[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
-                        onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage}
+                        onRespondToRequest={onRespondToRequest} onSendMessage={onSendMessage}
                         messages={allMessages} allUsers={allUsers} onCreateAgent={handleCreateAgent} onOpenChat={handleOpenChat}
                         chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
+                        fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} 
+                        fightHistory={fightHistory} upcomingFights={upcomingFights}
                     />
                 );
             case UserRole.OPERATOR:

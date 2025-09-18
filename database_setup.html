@@ -241,7 +241,7 @@ BEGIN
         RETURN 'Error: Only Operators can create Master Agent users.';
     END IF;
 
-    PERFORM auth.admin_create_user(p_email, p_password, jsonb_build_object(
+    PERFORM auth.admin.create_user(p_email, p_password, jsonb_build_object(
         'name', p_name,
         'role', 'MASTER_AGENT'
     ));
@@ -265,7 +265,7 @@ BEGIN
         RETURN 'Error: Only Master Agents can create Agent users.';
     END IF;
 
-    PERFORM auth.admin_create_user(p_email, p_password, jsonb_build_object(
+    PERFORM auth.admin.create_user(p_email, p_password, jsonb_build_object(
         'name', p_name,
         'role', 'AGENT',
         'master_agent_id', caller_id
