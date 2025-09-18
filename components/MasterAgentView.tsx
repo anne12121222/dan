@@ -6,7 +6,7 @@ import ChatModal from './ChatModal';
 import Card from './common/Card';
 import RequestCoinsModal from './RequestCoinsModal';
 import CreateAgentModal from './CreateAgentModal';
-import { UsersIcon, ChatBubbleLeftEllipsisIcon, UserPlusIcon } from './common/Icons';
+import { UsersIcon, CoinTransferIcon, UserPlusIcon } from './common/Icons';
 
 interface MasterAgentViewProps {
   currentUser: MasterAgent;
@@ -61,7 +61,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                         onClick={() => setRequestModalOpen(true)}
                         className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
                     >
-                        Request Coins
+                        Request Coins from Operator
                     </button>
                  </div>
             </div>
@@ -84,9 +84,10 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                                 </div>
                                 <button
                                     onClick={() => setChatTargetUser(agent)}
-                                    className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300"
+                                    className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition duration-300 flex items-center gap-2 text-sm"
                                 >
-                                    <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                                    <CoinTransferIcon className="w-5 h-5" />
+                                    Send Coins / Message
                                 </button>
                             </li>
                         ))}

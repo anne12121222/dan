@@ -251,7 +251,8 @@ BEGIN
     IF player_balance < p_amount THEN
         RETURN 'Error: Insufficient balance.';
     END IF;
-
+    
+    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (auth.uid(), null, p_amount, 'BET_PLACE');
     UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = auth.uid();
     INSERT INTO public.bets(user_id, fight_id, amount, choice) VALUES (auth.uid(), p_fight_id, p_amount, p_choice);
     RETURN NULL; -- Success
@@ -269,16 +270,20 @@ DECLARE
     master_agent_record RECORD;
     winning_pool numeric := 0;
     losing_pool numeric := 0;
-    player_winnings numeric;
+    player_profit numeric;
+    player_payout numeric;
     agent_commission numeric;
     master_agent_commission numeric;
     payout_ratio numeric;
+    operator_id uuid;
 BEGIN
     UPDATE public.fights SET status = 'BETTING_CLOSED' WHERE id = p_fight_id;
+    SELECT id INTO operator_id FROM public.profiles WHERE role = 'OPERATOR' LIMIT 1;
 
     IF p_winner = 'DRAW' OR p_winner = 'CANCELLED' THEN
         FOR bet_record IN SELECT * FROM public.bets WHERE fight_id = p_fight_id LOOP
             UPDATE public.profiles SET coin_balance = coin_balance + bet_record.amount WHERE id = bet_record.user_id;
+            INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (null, bet_record.user_id, bet_record.amount, 'BET_REFUND');
         END LOOP;
     ELSE
         SELECT COALESCE(SUM(amount), 0) INTO winning_pool FROM public.bets WHERE fight_id = p_fight_id AND choice::text = p_winner::text;
@@ -287,22 +292,39 @@ BEGIN
         payout_ratio := CASE WHEN winning_pool > 0 THEN losing_pool / winning_pool ELSE 0 END;
         
         FOR bet_record IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice::text = p_winner::text LOOP
-            player_winnings := bet_record.amount + (bet_record.amount * payout_ratio);
+            -- Calculate player's full winnings and profit
+            player_profit := bet_record.amount * payout_ratio;
+            player_payout := bet_record.amount + player_profit;
 
+            -- Get profiles for player, agent, and master agent
             SELECT * INTO player_record FROM public.profiles WHERE id = bet_record.user_id;
             SELECT * INTO agent_record FROM public.profiles WHERE id = player_record.agent_id;
             SELECT * INTO master_agent_record FROM public.profiles WHERE id = agent_record.master_agent_id;
 
-            agent_commission := (player_winnings - bet_record.amount) * agent_record.commission_rate;
-            master_agent_commission := (player_winnings - bet_record.amount) * master_agent_record.commission_rate;
+            -- Calculate commissions based on player's profit
+            agent_commission := player_profit * agent_record.commission_rate;
+            master_agent_commission := player_profit * master_agent_record.commission_rate;
 
-            UPDATE public.profiles SET coin_balance = coin_balance + (player_winnings - agent_commission - master_agent_commission) WHERE id = player_record.id;
+            -- PAYOUTS:
+            -- 1. Player receives their full winnings.
+            UPDATE public.profiles SET coin_balance = coin_balance + player_payout WHERE id = player_record.id;
+            INSERT INTO public.transactions(from_user_id, to_user_id, amount, type) VALUES (operator_id, player_record.id, player_payout, 'BET_WIN');
+
+            -- 2. Agent receives their commission.
             UPDATE public.profiles SET commission_balance = commission_balance + agent_commission WHERE id = agent_record.id;
+            INSERT INTO public.transactions(from_user_id, to_user_id, amount, type) VALUES (operator_id, agent_record.id, agent_commission, 'COMMISSION');
+
+            -- 3. Master Agent receives their commission.
             UPDATE public.profiles SET commission_balance = commission_balance + master_agent_commission WHERE id = master_agent_record.id;
+            INSERT INTO public.transactions(from_user_id, to_user_id, amount, type) VALUES (operator_id, master_agent_record.id, master_agent_commission, 'COMMISSION');
         END LOOP;
+        
+        -- The Operator's balance increases by the losing pool and decreases by the profit paid to winners and commissions.
+        UPDATE public.profiles SET coin_balance = coin_balance + losing_pool - (winning_pool * payout_ratio) WHERE id = operator_id;
+
     END IF;
 
-    UPDATE public.fights SET winner = p_winner, status = 'SETTLED', commission = (winning_pool + losing_pool) * 0.10 WHERE id = p_fight_id;
+    UPDATE public.fights SET winner = p_winner, status = 'SETTLED' WHERE id = p_fight_id;
 END;
 $$ LANGUAGE plpgsql;
 

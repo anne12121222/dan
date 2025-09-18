@@ -25,6 +25,12 @@ export const CoinIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+export const CoinTransferIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+         <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15M9 12l3 3m0 0l3-3m-3 3V2.25" />
+    </svg>
+);
+
 export const UsersIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-4.663M12 3.375c-1.621 0-3.074.49-4.333 1.332C6.374 5.485 5.25 7.156 5.25 9c0 1.844 1.124 3.515 2.843 4.332C9.926 14.51 11.379 15 13 15h.001c1.621 0 3.074-.49 4.333-1.332C18.626 12.844 19.75 11.156 19.75 9c0-1.844-1.124-3.515-2.843-4.332C15.074 3.865 13.621 3.375 12 3.375z" />

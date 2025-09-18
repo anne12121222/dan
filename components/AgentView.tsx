@@ -6,7 +6,7 @@ import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
 import Card from './common/Card';
 import RequestCoinsModal from './RequestCoinsModal';
-import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
+import { UsersIcon, CoinTransferIcon } from './common/Icons';
 
 interface AgentViewProps {
   currentUser: Agent;
@@ -82,8 +82,9 @@ const AgentView: React.FC<AgentViewProps> = ({
                                 <button
                                     onClick={() => setChatTargetUser(player)}
                                     className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300"
+                                    aria-label={`Send coins to ${player.name}`}
                                 >
-                                    <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                                    <CoinTransferIcon className="w-5 h-5" />
                                 </button>
                             </li>
                         ))}

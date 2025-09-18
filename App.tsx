@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
@@ -15,7 +16,7 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import ChangePasswordModal from './components/ChangePasswordModal';
 
 
-const FIGHT_TIMER_DURATION = 60; // 60 seconds for betting
+const FIGHT_TIMER_DURATION = 15; // 15 seconds for betting
 
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<AllUserTypes | null>(null);
@@ -200,23 +201,28 @@ const App: React.FC = () => {
         else showNotification(`Next fight started! Betting is open.`, 'success');
     };
 
-    const handleCloseBetting = async () => {
+    const handleCloseBetting = useCallback(async () => {
         if (!supabase || fightId === null) return;
         const { error } = await supabase.rpc('close_betting', { p_fight_id: fightId });
         if(error) handleRpcError(error, "Failed to close betting.");
         else showNotification('Betting is now closed.', 'success');
-    };
+    }, [supabase, fightId]);
 
     useEffect(() => {
+        // FIX: Use ReturnType<typeof setInterval> for browser compatibility instead of NodeJS.Timeout.
+        let interval: ReturnType<typeof setInterval> | null = null;
         if (fightStatus === FightStatus.BETTING_OPEN && timer > 0) {
-            const interval = setInterval(() => setTimer(t => t - 1), 1000);
-            return () => clearInterval(interval);
+            interval = setInterval(() => setTimer(t => t - 1), 1000);
         } else if (fightStatus === FightStatus.BETTING_OPEN && timer === 0) {
             handleCloseBetting();
         } else if (fightStatus !== FightStatus.BETTING_OPEN) {
             setTimer(FIGHT_TIMER_DURATION);
         }
-    }, [fightStatus, timer]);
+        
+        return () => {
+            if(interval) clearInterval(interval);
+        };
+    }, [fightStatus, timer, handleCloseBetting]);
 
     const onDeclareWinner = async (winner: FightWinner) => {
         if (!supabase || fightId === null) return;
