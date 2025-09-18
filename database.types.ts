@@ -298,13 +298,25 @@ export interface Database {
           text: string | null
         }[]
       }
+      get_my_agent_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      get_my_master_agent_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      get_my_role: {
+        Args: Record<PropertyKey, never>
+        Returns: "OPERATOR" | "MASTER_AGENT" | "AGENT" | "PLAYER"
+      }
       get_registerable_agents: {
-        Args: Record<PropertyKey, never>;
+        Args: Record<PropertyKey, never>
         Returns: {
-          id: string;
-          name: string;
-        }[];
-      };
+          id: string
+          name: string
+        }[]
+      }
       get_transactions_for_user: {
         Args: Record<PropertyKey, never>
         Returns: {
