@@ -248,25 +248,20 @@ const App: React.FC = () => {
     const handleRegister = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!isSupabaseConfigured || !supabase) return "Supabase is not configured.";
         
-        // Step 1: Sign up the user in auth.users. The session is automatically created.
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email, password
+        // The new, simplified, single-step registration.
+        // The database trigger will automatically handle creating the user's profile.
+        const { error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                data: {
+                    name: name
+                }
+            }
         });
 
-        if (signUpError) return signUpError.message;
-        if (!signUpData.user) return "Registration failed: user not created.";
-
-        // Step 2: The user is now authenticated. Call the RPC function to create their profile.
-        const { error: rpcError } = await supabase.rpc('create_user_profile', {
-            p_name: name,
-            p_email: email
-        });
-
-        if (rpcError) {
-            console.error("Critical Error: Failed to create user profile after signup.", rpcError);
-            // Sign the user out to prevent them being in a broken state.
-            await supabase.auth.signOut();
-            return `Registration succeeded, but failed to create your user profile. Please contact support. Error: ${rpcError.message}`;
+        if (error) {
+            return error.message;
         }
 
         showNotification('Registration successful! Check your email for verification.', 'success');

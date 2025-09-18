@@ -97,7 +97,32 @@ create table if not exists public.messages (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 5. ROW-LEVEL SECURITY (RLS)
+
+-- 5. NEW USER TRIGGER (Replaces RPC call for robust profile creation)
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, name, email, role)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'name',
+    new.email,
+    'PLAYER'::public.user_role -- All new signups default to Player
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Drop trigger if it exists to ensure a clean setup
+drop trigger if exists on_auth_user_created on auth.users;
+-- Create the trigger to automatically create a profile when a new user signs up
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+
+-- 6. ROW-LEVEL SECURITY (RLS)
+
 -- Enable RLS on all tables
 alter table public.profiles enable row level security;
 alter table public.fights enable row level security;
@@ -108,16 +133,16 @@ alter table public.coin_requests enable row level security;
 alter table public.messages enable row level security;
 
 -- Drop existing policies to ensure a clean slate
-drop policy if exists "Allow service_role full access" on public.profiles;
-drop policy if exists "Allow users to insert their own profile" on public.profiles;
+drop policy if exists "Enable all access for service_role" on public.profiles;
 drop policy if exists "Allow users to read their own profile" on public.profiles;
-drop policy if exists "Allow authenticated users to see Agents" on public.profiles;
 drop policy if exists "Allow users to update their own profile" on public.profiles;
 drop policy if exists "Allow public read access to all fights" on public.fights;
 drop policy if exists "Allow public read access to upcoming fights" on public.upcoming_fights;
 drop policy if exists "Allow authenticated users to place bets" on public.bets;
 drop policy if exists "Allow users to read their own bets" on public.bets;
-drop policy if exists "Allow superiors to read their subordinates' bets" on public.bets;
+drop policy if exists "Agents can read their players bets" on public.bets;
+drop policy if exists "Master Agents can read their agents players bets" on public.bets;
+drop policy if exists "Operators can read all bets" on public.bets;
 drop policy if exists "Allow users to read their own transactions" on public.transactions;
 drop policy if exists "Allow users to read coin requests involving them" on public.coin_requests;
 drop policy if exists "Allow users to create their own coin requests" on public.coin_requests;
@@ -126,12 +151,22 @@ drop policy if exists "Allow users to read messages involving them" on public.me
 drop policy if exists "Allow users to send messages" on public.messages;
 
 -- Grant basic usage permissions
-grant usage on schema public to anon, authenticated;
+grant usage on schema public to anon, authenticated, service_role;
 
--- PROFILES POLICIES (NEW SIMPLIFIED ARCHITECTURE)
-create policy "Allow users to insert their own profile" on public.profiles for insert to authenticated with check (auth.uid() = id);
+-- HELPER FUNCTION
+create or replace function public.get_user_role(p_user_id uuid)
+returns public.user_role as $$
+declare
+  v_role public.user_role;
+begin
+  select role into v_role from public.profiles where id = p_user_id;
+  return v_role;
+end;
+$$ language plpgsql stable security definer set search_path = '';
+
+-- PROFILES POLICIES
+create policy "Enable all access for service_role" on public.profiles for all to service_role using (true);
 create policy "Allow users to read their own profile" on public.profiles for select to authenticated using (auth.uid() = id);
-create policy "Allow authenticated users to see Agents" on public.profiles for select to authenticated using (role = 'AGENT'::public.user_role);
 create policy "Allow users to update their own profile" on public.profiles for update to authenticated using (auth.uid() = id);
 
 -- FIGHTS & UPCOMING FIGHTS POLICIES
@@ -141,15 +176,16 @@ create policy "Allow public read access to upcoming fights" on public.upcoming_f
 -- BETS POLICIES
 create policy "Allow authenticated users to place bets" on public.bets for insert to authenticated with check (auth.uid() = user_id);
 create policy "Allow users to read their own bets" on public.bets for select using (auth.uid() = user_id);
-create policy "Allow superiors to read their subordinates' bets" on public.bets for select using (
-  exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and (
-      (p.role = 'AGENT'::public.user_role and p.id = (select agent_id from public.profiles where id = bets.user_id)) or
-      (p.role = 'MASTER_AGENT'::public.user_role and p.id = (select master_agent_id from public.profiles where id = (select agent_id from public.profiles where id = bets.user_id))) or
-      (p.role = 'OPERATOR'::public.user_role)
-    )
-  )
+create policy "Agents can read their players bets" on public.bets for select using (
+  (select public.get_user_role(auth.uid())) = 'AGENT'::public.user_role and
+  (select agent_id from public.profiles where id = bets.user_id) = auth.uid()
+);
+create policy "Master Agents can read their agents players bets" on public.bets for select using (
+  (select public.get_user_role(auth.uid())) = 'MASTER_AGENT'::public.user_role and
+  (select master_agent_id from public.profiles where id = (select agent_id from public.profiles where id = bets.user_id)) = auth.uid()
+);
+create policy "Operators can read all bets" on public.bets for select using (
+  (select public.get_user_role(auth.uid())) = 'OPERATOR'::public.user_role
 );
 
 -- TRANSACTIONS POLICIES
@@ -165,7 +201,8 @@ create policy "Allow users to read messages involving them" on public.messages f
 create policy "Allow users to send messages" on public.messages for insert with check (auth.uid() = sender_id);
 
 
--- 6. DATABASE FUNCTIONS
+-- 7. DATABASE FUNCTIONS
+
 -- Internal helper functions (SECURITY DEFINER context)
 create or replace function internal_transfer_coins(
     p_from_user_id uuid,
@@ -179,7 +216,7 @@ begin
     insert into public.transactions (from_user_id, to_user_id, amount, type)
     values (p_from_user_id, p_to_user_id, p_amount, p_type);
 end;
-$$ language plpgsql security definer set search_path = public;
+$$ language plpgsql security definer set search_path = '';
 
 create or replace function internal_set_player_agent(
     p_player_id uuid,
@@ -188,25 +225,7 @@ create or replace function internal_set_player_agent(
 begin
     update public.profiles set agent_id = p_agent_id where id = p_player_id and role = 'PLAYER'::public.user_role;
 end;
-$$ language plpgsql security definer set search_path = public;
-
--- REMOVED handle_new_user trigger logic
-
--- NEW RPC function to create a profile after sign up.
-create or replace function public.create_user_profile(
-    p_name text,
-    p_email text
-) returns void as $$
-begin
-  insert into public.profiles (id, name, email, role)
-  values (
-    auth.uid(),
-    p_name,
-    p_email,
-    'PLAYER'::public.user_role
-  );
-end;
-$$ language plpgsql security invoker; -- Runs as the newly created user
+$$ language plpgsql security definer set search_path = '';
 
 
 -- Function to create a coin request
@@ -248,7 +267,7 @@ begin
 end;
 $$ language plpgsql volatile;
 
--- Function to respond to a coin request
+-- Function to respond to a coin request (DEADLOCK-PROOF)
 create or replace function public.respond_to_coin_request(
     p_request_id uuid,
     p_response request_status
@@ -258,25 +277,31 @@ declare
     v_requester public.profiles;
     v_responder public.profiles;
 begin
-    select * into v_request from public.coin_requests where id = p_request_id;
+    -- Lock the request row first to perform initial validation.
+    select * into v_request from public.coin_requests where id = p_request_id for update;
+
     if v_request is null then return 'Error: Request not found.'; end if;
     if v_request.to_user_id <> auth.uid() then return 'Error: You are not authorized to respond to this request.'; end if;
     if v_request.status <> 'PENDING'::public.request_status then return 'Error: This request has already been actioned.'; end if;
 
-    select * into v_responder from public.profiles where id = auth.uid();
+    -- Now, lock the user profiles in a deterministic order (by UUID) to prevent deadlocks.
+    if v_request.from_user_id < v_request.to_user_id then
+        select * into v_requester from public.profiles where id = v_request.from_user_id for update;
+        select * into v_responder from public.profiles where id = v_request.to_user_id for update;
+    else
+        select * into v_responder from public.profiles where id = v_request.to_user_id for update;
+        select * into v_requester from public.profiles where id = v_request.from_user_id for update;
+    end if;
 
     if p_response = 'APPROVED'::public.request_status then
         if v_responder.coin_balance < v_request.amount then return 'Error: Insufficient funds to approve this request.'; end if;
-        
-        -- Perform the transfer using the secure helper
-        perform internal_transfer_coins(v_responder.id, v_request.from_user_id, v_request.amount, 'TRANSFER'::public.transaction_type);
+
+        perform internal_transfer_coins(v_responder.id, v_requester.id, v_request.amount, 'TRANSFER'::public.transaction_type);
 
         -- Adoption Logic: If an Agent approves a request from an unassigned player
-        select * into v_requester from public.profiles where id = v_request.from_user_id;
         if v_responder.role = 'AGENT'::public.user_role and v_requester.role = 'PLAYER'::public.user_role and v_requester.agent_id is null then
             perform internal_set_player_agent(v_requester.id, v_responder.id);
         end if;
-        
     end if;
 
     update public.coin_requests set status = p_response where id = p_request_id;
@@ -285,6 +310,7 @@ end;
 $$ language plpgsql volatile;
 
 -- Function for data fetching
+drop function if exists public.get_user_view_data();
 create or replace function public.get_user_view_data()
 returns table (
     id uuid, name text, email text, role public.user_role, coin_balance numeric,
@@ -301,36 +327,179 @@ begin
     elsif v_caller_profile.role = 'MASTER_AGENT'::public.user_role then
         return query select p.* from public.profiles p where p.master_agent_id = v_caller_profile.id or p.id = v_caller_profile.id;
     elsif v_caller_profile.role = 'AGENT'::public.user_role then
-        return query select p.* from public.profiles p where p.agent_id = v_caller_profile.id or p.id = v_caller_profile.id or p.id = v_caller_profile.master_agent_id;
+        -- Agent sees their players, themself, their master agent, and other master agents if they are unassigned
+        return query 
+            select p.* from public.profiles p 
+            where p.agent_id = v_caller_profile.id -- their players
+            or p.id = v_caller_profile.id -- themself
+            or p.id = v_caller_profile.master_agent_id -- their master agent
+            or (v_caller_profile.master_agent_id is null and p.role = 'MASTER_AGENT'::public.user_role); -- all master agents if unassigned
     elsif v_caller_profile.role = 'PLAYER'::public.user_role then
         if v_caller_profile.agent_id is null then
-            -- Unassigned player can see all agents to make a request
+            -- Unassigned player can see all agents to make a request, plus themself
             return query select p.* from public.profiles p where p.role = 'AGENT'::public.user_role or p.id = v_caller_profile.id;
         else
+            -- Assigned player sees themself and their agent
             return query select p.* from public.profiles p where p.id = v_caller_profile.agent_id or p.id = v_caller_profile.id;
         end if;
     end if;
 end;
-$$ language plpgsql security definer stable set search_path = public;
+$$ language plpgsql security definer stable set search_path = '';
+
+-- DATA FETCHING FUNCTIONS (Full Implementations)
+drop function if exists public.get_all_users_for_operator();
+create or replace function public.get_all_users_for_operator()
+returns table (
+    id uuid, name text, email text, role public.user_role, coin_balance numeric,
+    commission_balance numeric, commission_rate numeric, transfer_fee numeric,
+    agent_id uuid, master_agent_id uuid
+) as $$
+begin
+    return query select p.* from public.profiles p;
+end;
+$$ language plpgsql stable security definer set search_path = '';
+
+drop function if exists public.get_coin_requests_for_user();
+create or replace function public.get_coin_requests_for_user()
+returns table(
+    id uuid, from_user_id uuid, to_user_id uuid, amount numeric,
+    status public.request_status, created_at timestamp with time zone
+) as $$
+begin
+    return query
+    select cr.id, cr.from_user_id, cr.to_user_id, cr.amount, cr.status, cr.created_at
+    from public.coin_requests cr
+    where cr.from_user_id = auth.uid() or cr.to_user_id = auth.uid();
+end;
+$$ language plpgsql stable security invoker;
+
+drop function if exists public.get_transactions_for_user();
+create or replace function public.get_transactions_for_user()
+returns table(
+    id uuid, from_user_id uuid, to_user_id uuid, amount numeric,
+    type public.transaction_type, transaction_timestamp timestamp with time zone
+) as $$
+begin
+    return query
+    select t.id, t.from_user_id, t.to_user_id, t.amount, t.type, t.transaction_timestamp
+    from public.transactions t
+    where t.from_user_id = auth.uid() or t.to_user_id = auth.uid();
+end;
+$$ language plpgsql stable security invoker;
+
+drop function if exists public.get_messages(uuid);
+create or replace function public.get_messages(p_other_user_id uuid)
+returns table(
+    id uuid, sender_id uuid, receiver_id uuid, text text,
+    amount numeric, created_at timestamp with time zone
+) as $$
+begin
+    return query
+    select m.id, m.sender_id, m.receiver_id, m.text, m.amount, m.created_at
+    from public.messages m
+    where (m.sender_id = auth.uid() and m.receiver_id = p_other_user_id)
+       or (m.sender_id = p_other_user_id and m.receiver_id = auth.uid())
+    order by m.created_at asc;
+end;
+$$ language plpgsql stable security invoker;
+
+-- FULLY IMPLEMENTED FUNCTIONS (Replacing stubs)
+
+create or replace function public.send_message_and_coins(
+    p_receiver_id uuid, 
+    p_text text, 
+    p_amount numeric
+) 
+returns text as $$
+declare
+    v_sender_profile public.profiles;
+    v_receiver_profile public.profiles;
+    v_sender_id uuid := auth.uid();
+begin
+    if p_amount > 0 then
+        -- Lock profiles in a deterministic order to prevent deadlocks
+        if v_sender_id < p_receiver_id then
+            select * into v_sender_profile from public.profiles where id = v_sender_id for update;
+            select * into v_receiver_profile from public.profiles where id = p_receiver_id for update;
+        else
+            select * into v_receiver_profile from public.profiles where id = p_receiver_id for update;
+            select * into v_sender_profile from public.profiles where id = v_sender_id for update;
+        end if;
+        
+        if v_sender_profile is null then return 'Error: Sender profile not found.'; end if;
+        if v_receiver_profile is null then return 'Error: Receiver profile not found.'; end if;
+
+        if v_sender_profile.coin_balance < p_amount then
+            return 'Error: Insufficient funds.';
+        end if;
+        
+        -- Perform transfer using the secure helper function
+        perform internal_transfer_coins(v_sender_id, p_receiver_id, p_amount, 'TRANSFER'::public.transaction_type);
+    end if;
+
+    -- Insert message, ensuring text is not empty
+    if p_text is not null and p_text <> '' then
+        insert into public.messages (sender_id, receiver_id, text, amount)
+        values (v_sender_id, p_receiver_id, p_text, p_amount);
+    end if;
+
+    return null;
+end;
+$$ language plpgsql volatile;
 
 
--- Other game logic functions...
--- For brevity, only providing the functions critical to the registration/adoption flow.
--- These would be included in a full production script.
+create or replace function public.place_bet(
+    p_fight_id int,
+    p_amount numeric,
+    p_choice bet_choice
+) 
+returns text as $$
+declare
+    v_fight public.fights;
+    v_player public.profiles;
+begin
+    -- Lock the player's profile first to prevent race conditions on their balance
+    select * into v_player from public.profiles where id = auth.uid() for update;
+    
+    if v_player.coin_balance < p_amount then
+        return 'Error: Insufficient balance.';
+    end if;
 
--- Stubs for other functions to ensure app compiles
-create or replace function public.get_all_users_for_operator() returns setof public.profiles as $$ select * from public.profiles; $$ language sql security definer;
-create or replace function public.get_coin_requests_for_user() returns setof public.coin_requests as $$ select * from public.coin_requests where from_user_id = auth.uid() or to_user_id = auth.uid(); $$ language sql security invoker;
-create or replace function public.get_transactions_for_user() returns setof public.transactions as $$ select * from public.transactions where from_user_id = auth.uid() or to_user_id = auth.uid(); $$ language sql security invoker;
-create or replace function public.get_messages(p_other_user_id uuid) returns setof public.messages as $$ select * from public.messages where (sender_id = auth.uid() and receiver_id = p_other_user_id) or (sender_id = p_other_user_id and receiver_id = auth.uid()); $$ language sql security invoker;
--- Stubs for operator actions
+    select * into v_fight from public.fights where id = p_fight_id;
+
+    if v_fight is null then
+        return 'Error: Fight not found.';
+    end if;
+    
+    if v_fight.status <> 'BETTING_OPEN'::public.fight_status then
+        return 'Error: Betting is closed for this fight.';
+    end if;
+
+    if exists (select 1 from public.bets where user_id = auth.uid() and fight_id = p_fight_id) then
+        return 'Error: You have already placed a bet on this fight.';
+    end if;
+
+    -- Decrease balance
+    update public.profiles set coin_balance = coin_balance - p_amount where id = auth.uid();
+    
+    -- Record transaction
+    insert into public.transactions (from_user_id, to_user_id, amount, type)
+    values (auth.uid(), null, p_amount, 'BET_PLACE'::public.transaction_type);
+
+    -- Insert bet
+    insert into public.bets (user_id, fight_id, amount, choice)
+    values (auth.uid(), p_fight_id, p_amount, p_choice);
+
+    return null;
+end;
+$$ language plpgsql volatile;
+
+
+-- Stubs for operator functions (can be implemented later)
 create or replace function public.start_next_fight() returns void as $$ begin end; $$ language plpgsql;
 create or replace function public.close_betting(p_fight_id int) returns void as $$ begin end; $$ language plpgsql;
 create or replace function public.declare_winner(p_fight_id int, p_winner_text text) returns void as $$ begin end; $$ language plpgsql;
 create or replace function public.add_upcoming_fight(p_red text, p_white text) returns void as $$ begin end; $$ language plpgsql;
--- Stubs for player/agent actions
-create or replace function public.place_bet(p_fight_id int, p_amount numeric, p_choice bet_choice) returns text as $$ begin return null; end; $$ language plpgsql;
-create or replace function public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount numeric) returns text as $$ begin return null; end; $$ language plpgsql;
 
 
 -- END OF SCRIPT

@@ -290,10 +290,6 @@ export interface Database {
         Args: { p_amount: number; p_target_user_id?: string | null }
         Returns: string
       }
-      create_user_profile: {
-        Args: { p_name: string; p_email: string }
-        Returns: undefined
-      }
       declare_winner: {
         Args: { p_fight_id: number; p_winner_text: string }
         Returns: undefined
