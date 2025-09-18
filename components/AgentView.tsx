@@ -18,6 +18,9 @@ interface AgentViewProps {
   onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
   messages: { [userId: string]: Message[] };
   allUsers: { [id: string]: AllUserTypes };
+  onOpenChat: (user: AllUserTypes) => void;
+  chatTargetUser: AllUserTypes | null;
+  onCloseChat: () => void;
 }
 
 const AgentView: React.FC<AgentViewProps> = ({
@@ -29,9 +32,11 @@ const AgentView: React.FC<AgentViewProps> = ({
   onCreateCoinRequest,
   onSendMessage,
   messages,
-  allUsers
+  allUsers,
+  onOpenChat,
+  chatTargetUser,
+  onCloseChat
 }) => {
-  const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
   const [isRequestModalOpen, setRequestModalOpen] = useState(false);
 
   const handleSendMessage = async (text: string, amount: number) => {
@@ -51,7 +56,7 @@ const AgentView: React.FC<AgentViewProps> = ({
                  <div className="flex items-center gap-2">
                     {masterAgent && (
                          <button 
-                            onClick={() => setChatTargetUser(masterAgent)}
+                            onClick={() => onOpenChat(masterAgent)}
                             className="bg-zinc-600 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-lg transition"
                          >
                              Chat with Master Agent
@@ -80,7 +85,7 @@ const AgentView: React.FC<AgentViewProps> = ({
                                     <p className="text-sm text-yellow-400">{player.coinBalance.toLocaleString()} C</p>
                                 </div>
                                 <button
-                                    onClick={() => setChatTargetUser(player)}
+                                    onClick={() => onOpenChat(player)}
                                     className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300"
                                     aria-label={`Send coins to ${player.name}`}
                                 >
@@ -119,7 +124,7 @@ const AgentView: React.FC<AgentViewProps> = ({
           currentUser={currentUser}
           chatTargetUser={chatTargetUser}
           messages={messages[chatTargetUser.id] || []}
-          onClose={() => setChatTargetUser(null)}
+          onClose={onCloseChat}
           onSendMessage={handleSendMessage}
         />
       )}

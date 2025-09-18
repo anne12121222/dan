@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Transaction, AllUserTypes } from '../types';
 import Card from './common/Card';
@@ -23,7 +22,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ title, transact
           <p className="text-gray-500 text-center p-6">No transactions yet.</p>
         ) : (
           <ul className="divide-y divide-gray-800">
-            {[...transactions].reverse().map(tx => {
+            {transactions.map(tx => {
               // FIX: Use correct snake_case properties and logic for transaction types.
               const fromName = tx.type === 'MINT' ? 'SYSTEM' : allUsers[tx.from_user_id!]?.name || 'Unknown';
               const toName = allUsers[tx.to_user_id!]?.name || 'Unknown';

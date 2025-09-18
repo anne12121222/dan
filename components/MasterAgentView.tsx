@@ -19,6 +19,9 @@ interface MasterAgentViewProps {
   onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
   messages: { [userId: string]: Message[] };
   allUsers: { [id:string]: AllUserTypes };
+  onOpenChat: (user: AllUserTypes) => void;
+  chatTargetUser: AllUserTypes | null;
+  onCloseChat: () => void;
 }
 
 const MasterAgentView: React.FC<MasterAgentViewProps> = ({
@@ -31,9 +34,11 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   onSendMessage,
   onCreateAgent,
   messages,
-  allUsers
+  allUsers,
+  onOpenChat,
+  chatTargetUser,
+  onCloseChat
 }) => {
-  const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
   const [isRequestModalOpen, setRequestModalOpen] = useState(false);
   const [isCreateAgentModalOpen, setCreateAgentModalOpen] = useState(false);
 
@@ -83,7 +88,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => setChatTargetUser(agent)}
+                                    onClick={() => onOpenChat(agent)}
                                     className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg transition duration-300 flex items-center gap-2 text-sm"
                                 >
                                     <CoinTransferIcon className="w-5 h-5" />
@@ -125,7 +130,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
           currentUser={currentUser}
           chatTargetUser={chatTargetUser}
           messages={messages[chatTargetUser.id] || []}
-          onClose={() => setChatTargetUser(null)}
+          onClose={onCloseChat}
           onSendMessage={handleSendMessage}
         />
       )}

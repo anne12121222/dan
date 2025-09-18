@@ -254,6 +254,14 @@ export interface Database {
         }
         Returns: string
       }
+      create_master_agent: {
+        Args: {
+          p_name: string
+          p_email: string
+          p_password: string
+        }
+        Returns: string
+      }
       create_coin_request: {
         Args: {
           p_amount: number
@@ -288,6 +296,13 @@ export interface Database {
           receiver_id: string
           sender_id: string
           text: string | null
+        }[]
+      }
+      get_registerable_agents: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          name: string
         }[]
       }
       get_transactions_for_user: {

@@ -12,9 +12,8 @@ const BettingPools: React.FC<BettingPoolsProps> = ({ pools }) => {
   const meronPercent = totalPool > 0 ? (pools.meron / totalPool) * 100 : 0;
   const walaPercent = totalPool > 0 ? (pools.wala / totalPool) * 100 : 0;
   
-  // Payout is simplified here. A real system would have a house edge.
-  const meronPayout = totalPool > 0 ? (totalPool / pools.meron) * 100 - 100: 0;
-  const walaPayout = totalPool > 0 ? (totalPool / pools.wala) * 100 - 100 : 0;
+  const meronPayout = totalPool > 0 && pools.meron > 0 ? (totalPool / pools.meron) * 100 - 100: 0;
+  const walaPayout = totalPool > 0 && pools.wala > 0 ? (totalPool / pools.wala) * 100 - 100 : 0;
 
 
   return (

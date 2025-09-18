@@ -5,7 +5,7 @@ interface AuthViewProps {
   onLogin: (email: string, password: string) => Promise<string | null>;
   onRegister: (name: string, email: string, password: string, agentId: string | null) => Promise<string | null>;
   isSupabaseConfigured: boolean;
-  agents: Agent[];
+  agents: {id: string, name: string}[];
 }
 
 const AuthForm: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConfigured, agents }) => {

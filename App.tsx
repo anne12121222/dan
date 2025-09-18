@@ -34,14 +34,16 @@ const App: React.FC = () => {
     // User-specific data
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [coinRequests, setCoinRequests] = useState<CoinRequest[]>([]);
-    const [messages, setMessages] = useState<{ [userId: string]: Message[] }>({});
+    const [playerBets, setPlayerBets] = useState<Bet[]>([]); // For player bet history
+    const [allMessages, setAllMessages] = useState<{ [conversationId: string]: Message[] }>({});
     
     // UI State
     const [isLoading, setIsLoading] = useState(true); // Global loading for auth check
     const [notification, setNotification] = useState<NotificationType | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [registerableAgents, setRegisterableAgents] = useState<Agent[]>([]);
+    const [registerableAgents, setRegisterableAgents] = useState<{id: string, name: string}[]>([]);
+    const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
     
     const realtimeChannel = useRef<any>(null);
 
@@ -69,7 +71,7 @@ const App: React.FC = () => {
     };
     
     const refreshAllData = useCallback(async () => {
-        if (!supabase) return;
+        if (!supabase || !currentUser) return;
         
         // Fetch all users/profiles
         const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*');
@@ -81,7 +83,7 @@ const App: React.FC = () => {
             }, {} as { [id: string]: AllUserTypes });
             setAllUsers(usersMap);
             // Also refresh current user's data from the new map
-             if (currentUser && usersMap[currentUser.id]) {
+             if (usersMap[currentUser.id]) {
                 setCurrentUser(usersMap[currentUser.id]);
             }
         }
@@ -120,7 +122,7 @@ const App: React.FC = () => {
         // Fetch fight history
         const { data: historyData, error: historyError } = await supabase.from('fights').select('*').order('created_at', { ascending: false }).limit(50);
         if (historyError) console.error('Error fetching fight history:', historyError);
-        else setFightHistory(historyData.map(f => ({...f, bets: []})));
+        else setFightHistory(historyData);
 
         // Fetch upcoming fights
         const { data: upcomingData, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
@@ -135,21 +137,25 @@ const App: React.FC = () => {
         const { data: reqs, error: reqsError } = await supabase.rpc('get_coin_requests_for_user');
         if(reqsError) console.error("Error fetching coin requests:", reqsError);
         else setCoinRequests(reqs);
+        
+        if (currentUser.role === UserRole.PLAYER) {
+            const { data: allMyBets, error: betsError } = await supabase.from('bets').select('*').eq('user_id', currentUser.id);
+            if(betsError) console.error("Error fetching player bets:", betsError)
+            else setPlayerBets(allMyBets);
+        }
 
     }, [currentUser]);
 
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
             if (!isSupabaseConfigured || !supabase) return;
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('role', UserRole.AGENT);
+            // Fetch agents using the new secure RPC function
+            const { data, error } = await supabase.rpc('get_registerable_agents');
 
             if (error) {
                 console.error("Error fetching agents for registration:", error.message || error);
             } else if (data) {
-                setRegisterableAgents(data.map(mapProfileToUserType) as Agent[]);
+                setRegisterableAgents(data);
             }
         };
         fetchAgentsForRegistration();
@@ -182,11 +188,9 @@ const App: React.FC = () => {
                 setCurrentUser(null);
                 setAllUsers({});
             }
-            setIsLoading(false); // Authentication check is complete, render the app
+            setIsLoading(false);
         };
 
-        // onAuthStateChange fires immediately with the current session and listens for all auth events.
-        // This is the most robust way to handle auth in Supabase.
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             handleAuthChange(session);
         });
@@ -198,14 +202,12 @@ const App: React.FC = () => {
         };
     }, [showNotification]);
 
-    // Effect for fetching data after a user has been authenticated
     useEffect(() => {
         if (currentUser) {
             refreshAllData();
         }
     }, [currentUser, refreshAllData]);
 
-    // Effect for setting up real-time subscriptions
     useEffect(() => {
         if (!supabase || !currentUser) {
             if (realtimeChannel.current) {
@@ -215,7 +217,7 @@ const App: React.FC = () => {
             return;
         };
 
-        if (realtimeChannel.current) return; // Already subscribed
+        if (realtimeChannel.current) return;
 
         realtimeChannel.current = supabase.channel('realtime-all')
             .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
@@ -236,7 +238,6 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured) return "Supabase is not configured.";
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) return error.message;
-        // onAuthStateChange listener will handle the rest
         return null;
     };
     
@@ -259,7 +260,6 @@ const App: React.FC = () => {
             showNotification(`Error logging out: ${error.message}`, 'error');
             setIsLoading(false);
         }
-        // onAuthStateChange will handle setting user to null and isLoading to false
     };
     
     const handleStartNextFight = async () => {
@@ -310,7 +310,7 @@ const App: React.FC = () => {
         if (!supabase || fightId === null) return "Not connected";
         const { data, error } = await supabase.rpc('place_bet', { p_fight_id: fightId, p_amount: amount, p_choice: choice });
         if (error) return handleRpcError(error, "Failed to place bet.");
-        if (data) return data; // Can return error messages from function
+        if (data) return data; 
         showNotification(`Bet of ${amount} placed on ${choice}.`, 'success');
         return null;
     };
@@ -332,12 +332,24 @@ const App: React.FC = () => {
         showNotification(`Request has been ${response.toLowerCase()}.`, 'success');
         return null;
     };
-
+    
+    const handleOpenChat = async (targetUser: AllUserTypes) => {
+        if (!supabase) return;
+        setChatTargetUser(targetUser);
+        const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: targetUser.id });
+        if (error) {
+            handleRpcError(error, `Failed to fetch messages for ${targetUser.name}`);
+        } else {
+            setAllMessages(prev => ({...prev, [targetUser.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
+        }
+    };
+    
     const onSendMessage = async (receiverId: string, text: string, amount: number) => {
         if(!supabase) return;
         const { data, error } = await supabase.rpc('send_message_and_coins', {p_receiver_id: receiverId, p_text: text, p_amount: amount });
         if(error) handleRpcError(error, "Failed to send message/coins.");
         if(data) showNotification(data, 'error');
+        // No need to manually refresh, realtime will handle it
     };
     
     const onChangePassword = async (oldPassword: string, newPassword: string): Promise<string | null> => {
@@ -355,19 +367,26 @@ const App: React.FC = () => {
         if(data && data.startsWith('Error:')) return data;
         showNotification(data || 'Agent created successfully!', 'success');
         return null;
-    }
+    };
+
+    const handleCreateMasterAgent = async (name: string, email: string, password: string):Promise<string|null> => {
+        if (!supabase) return "Not connected";
+        const { data, error } = await supabase.rpc('create_master_agent', { p_name: name, p_email: email, p_password: password });
+        if(error) return handleRpcError(error, "Failed to create master agent.");
+        if(data && data.startsWith('Error:')) return data;
+        showNotification(data || 'Master Agent created successfully!', 'success');
+        return null;
+    };
 
     const renderUserView = () => {
         if (!currentUser) {
-            // This case should ideally not be hit if a user is logged in, but serves as a fallback.
             return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
         }
 
         switch (currentUser.role) {
             case UserRole.PLAYER:
                 const playerHistory: PlayerFightHistoryEntry[] = fightHistory.map(fh => {
-                     const bet = currentBets.find(b => b.fightId === fh.id && b.userId === currentUser.id) 
-                                || fightHistory.flatMap(f => f.bets ?? []).find(b => b.fightId === fh.id && b.userId === currentUser.id);
+                    const bet = playerBets.find(b => b.fightId === fh.id);
                     let outcome: PlayerFightHistoryEntry['outcome'] = undefined;
                     if(bet){
                         if(fh.winner === "DRAW" || fh.winner === "CANCELLED") outcome = 'REFUND';
@@ -389,7 +408,8 @@ const App: React.FC = () => {
                         currentUser={currentUser as Agent}
                         players={Object.values(allUsers).filter(u => u.role === UserRole.PLAYER && u.agentId === currentUser.id) as Player[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
-                        onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage} messages={messages} allUsers={allUsers}
+                        onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage} 
+                        messages={allMessages} allUsers={allUsers} onOpenChat={handleOpenChat} chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
                     />
                 );
             case UserRole.MASTER_AGENT:
@@ -399,7 +419,8 @@ const App: React.FC = () => {
                         agents={Object.values(allUsers).filter(u => u.role === UserRole.AGENT && u.masterAgentId === currentUser.id) as Agent[]}
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
                         onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage}
-                        messages={messages} allUsers={allUsers} onCreateAgent={handleCreateAgent}
+                        messages={allMessages} allUsers={allUsers} onCreateAgent={handleCreateAgent} onOpenChat={handleOpenChat}
+                        chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
                     />
                 );
             case UserRole.OPERATOR:
@@ -407,7 +428,7 @@ const App: React.FC = () => {
                     <OperatorView
                         currentUser={currentUser as Operator} fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} fightHistory={fightHistory}
                         upcomingFights={upcomingFights} currentBets={currentBets} allUsers={allUsers} onStartNextFight={handleStartNextFight}
-                        onCloseBetting={handleCloseBetting} onDeclareWinner={onDeclareWinner} onAddUpcomingFight={onAddUpcomingFight}
+                        onCloseBetting={handleCloseBetting} onDeclareWinner={onDeclareWinner} onAddUpcomingFight={onAddUpcomingFight} onCreateMasterAgent={handleCreateMasterAgent}
                     />
                 );
             default:
