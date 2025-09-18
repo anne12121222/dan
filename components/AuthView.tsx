@@ -62,7 +62,7 @@ const AuthForm: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConf
       <div className="w-full max-w-md p-8 space-y-6 bg-zinc-800/50 rounded-lg shadow-2xl border border-zinc-700 backdrop-blur-sm">
         <div className="text-center">
             <h2 className="text-3xl font-bold text-white">
-            International Gamefowl Boxing
+            Reality Boxing Federation
             </h2>
             <p className="mt-2 text-sm text-gray-400">
                 Please {isLoginView ? 'sign in' : 'create an account'} to continue

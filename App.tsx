@@ -208,7 +208,8 @@ const App: React.FC = () => {
 
                 if (error || !profile) {
                     console.error("Login failed: Could not find a user profile.", error);
-                    showNotification("Login failed: Your user profile could not be loaded.", 'error');
+                    // SILENTLY LOG OUT: Do not show an error toast if profile is missing, just sign out.
+                    // showNotification("Login failed: Your user profile could not be loaded.", 'error');
                     await supabase.auth.signOut();
                     setCurrentUser(null);
                 } else {
@@ -292,9 +293,14 @@ const App: React.FC = () => {
             if (error.message !== 'Auth session missing!') {
                 showNotification(`Error logging out: ${error.message}`, 'error');
             }
-            setIsLoading(false); // Ensure loading state is reset on error
         }
-        // On successful signout, the onAuthStateChange listener will handle resetting state and isLoading.
+        // On successful signout, or if the session was already missing, the onAuthStateChange listener 
+        // will handle resetting all state and setting isLoading to false.
+        // Explicitly clear sensitive state as a fallback.
+        setCurrentUser(null);
+        setAllUsers({});
+        setIsMasquerading(false);
+        setIsLoading(false);
     };
     
     const handleStartNextFight = async () => {

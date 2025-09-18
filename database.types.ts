@@ -348,7 +348,18 @@ export interface Database {
       }
       get_user_view_data: {
         Args: Record<PropertyKey, never>
-        Returns: Json
+        Returns: {
+            id: string
+            name: string
+            email: string
+            role: Database["public"]["Enums"]["user_role"]
+            coin_balance: number
+            commission_balance: number
+            commission_rate: number
+            transfer_fee: number
+            agent_id: string | null
+            master_agent_id: string | null
+          }[]
       }
       place_bet: {
         Args: {

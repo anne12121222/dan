@@ -35,7 +35,7 @@ const Header: React.FC<HeaderProps> = ({ currentUser, onLogout, onSettings, onTo
                <Bars3Icon className="h-6 w-6" />
              </button>
             <div className="flex-shrink-0 text-white font-bold text-lg">
-              Gamefowl Boxing
+              Reality Boxing
             </div>
           </div>
           <div className="flex items-center space-x-4">
