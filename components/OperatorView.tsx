@@ -74,7 +74,7 @@ const OperatorView: React.FC<OperatorViewProps> = ({
             <WinnerDeclaration onDeclareWinner={onDeclareWinner} disabled={!isBettingClosed}/>
         )}
 
-        <LiveBetsList bets={currentBets} allUsers={allUsers} />
+        <LiveBetsList bets={currentBets} allUsers={allUsers} fightId={fightId} />
       </div>
       <div className="space-y-6">
         <AddUpcomingFightForm onAddFight={onAddUpcomingFight} />

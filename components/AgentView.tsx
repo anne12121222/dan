@@ -40,18 +40,30 @@ const AgentView: React.FC<AgentViewProps> = ({
     }
   };
 
+  const masterAgent = allUsers[currentUser.masterAgentId];
+
   return (
     <>
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center flex-wrap gap-2">
                  <h2 className="text-2xl font-bold text-gray-200">Agent Dashboard</h2>
-                 <button 
-                    onClick={() => setRequestModalOpen(true)}
-                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
-                 >
-                     Request Coins from Master Agent
-                 </button>
+                 <div className="flex items-center gap-2">
+                    {masterAgent && (
+                         <button 
+                            onClick={() => setChatTargetUser(masterAgent)}
+                            className="bg-zinc-600 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                         >
+                             Chat with Master Agent
+                         </button>
+                    )}
+                     <button 
+                        onClick={() => setRequestModalOpen(true)}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                     >
+                         Request Coins
+                     </button>
+                 </div>
             </div>
           <Card>
             <div className="p-4 border-b border-gray-700 flex items-center space-x-2">
@@ -86,15 +98,15 @@ const AgentView: React.FC<AgentViewProps> = ({
         <div className="space-y-6">
             <Card>
                  <div className="p-4">
-                    <h3 className="text-lg font-semibold text-gray-200">My Commission Info</h3>
-                     <div className="text-xs text-gray-400 mt-2 space-y-1">
-                        <p>Bet Win Commission: <span className="font-semibold text-gray-300">{(currentUser.commissionRate * 100).toFixed(0)}%</span></p>
+                    <h3 className="text-lg font-semibold text-gray-200">My Info</h3>
+                     <div className="text-sm text-gray-400 mt-2 space-y-2">
+                        <p>Bet Win Commission Rate: <span className="font-semibold text-gray-300">{(currentUser.commissionRate * 100).toFixed(0)}%</span></p>
                         <p>Coin Transfer Fee: <span className="font-semibold text-gray-300">{(currentUser.transferFee * 100).toFixed(0)}%</span></p>
                     </div>
                  </div>
             </Card>
           <PendingCoinRequests
-            requests={coinRequests}
+            requests={coinRequests.filter(r => r.status === 'PENDING')}
             onRespond={onRespondToRequest}
             allUsers={allUsers}
             title="Player Coin Requests"

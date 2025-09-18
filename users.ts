@@ -19,12 +19,14 @@ export const ALL_USERS_BY_ID: { [id: string]: AllUserTypes } = {
     id: '3', name: 'Agent 1', email: 'agent1@test.com', password: 'password',
     role: UserRole.AGENT, masterAgentId: '2', coinBalance: 50000,
     // FIX: Add missing properties to conform to Agent type.
+    commissionBalance: 0,
     commissionRate: 0.07, transferFee: 0.01,
   } as Agent,
   '4': {
     id: '4', name: 'Agent 2', email: 'agent2@test.com', password: 'password',
     role: UserRole.AGENT, masterAgentId: '2', coinBalance: 75000,
     // FIX: Add missing properties to conform to Agent type.
+    commissionBalance: 0,
     commissionRate: 0.07, transferFee: 0.01,
   } as Agent,
   '5': {

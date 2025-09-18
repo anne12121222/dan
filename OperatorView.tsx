@@ -71,7 +71,8 @@ const OperatorView: React.FC<OperatorViewProps> = ({
             <WinnerDeclaration onDeclareWinner={onDeclareWinner} disabled={!isBettingClosed}/>
         )}
 
-        <LiveBetsList bets={currentBets} allUsers={allUsers} />
+        {/* FIX: Pass the 'fightId' prop to LiveBetsList as it is required. */}
+        <LiveBetsList bets={currentBets} allUsers={allUsers} fightId={fightId} />
       </div>
       <div className="space-y-6">
         <AddUpcomingFightForm onAddFight={onAddUpcomingFight} />

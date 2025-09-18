@@ -86,7 +86,7 @@ export interface Database {
         Insert: {
           commission?: number
           created_at?: string
-          id?: number
+          id: number
           status?: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
           winner?: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
         }
@@ -128,7 +128,9 @@ export interface Database {
         Row: {
           agent_id: string | null
           coin_balance: number
-          commission_balance: number | null
+          commission_balance: number
+          commission_rate: number
+          transfer_fee: number
           email: string
           id: string
           master_agent_id: string | null
@@ -138,7 +140,9 @@ export interface Database {
         Insert: {
           agent_id?: string | null
           coin_balance?: number
-          commission_balance?: number | null
+          commission_balance?: number
+          commission_rate?: number
+          transfer_fee?: number
           email: string
           id: string
           master_agent_id?: string | null
@@ -229,26 +233,32 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
+      add_upcoming_fight: {
+        Args: {
+          p_red: string
+          p_white: string
+        }
+        Returns: undefined
+      }
       close_betting: {
         Args: {
           p_fight_id: number
         }
         Returns: undefined
       }
+      create_agent: {
+        Args: {
+          p_name: string
+          p_email: string
+          p_password: string
+        }
+        Returns: string
+      }
       create_coin_request: {
         Args: {
           p_amount: number
         }
         Returns: string | null
-      }
-      create_user: {
-        Args: {
-          p_name: string
-          p_email: string
-          p_password: string
-          p_role: "OPERATOR" | "MASTER_AGENT" | "AGENT" | "PLAYER"
-        }
-        Returns: string
       }
       declare_winner: {
         Args: {
@@ -318,11 +328,11 @@ export interface Database {
           p_text: string
           p_amount: number
         }
-        Returns: undefined
+        Returns: string | null
       }
       start_next_fight: {
         Args: Record<PropertyKey, never>
-        Returns: undefined
+        Returns: number
       }
     }
     Enums: {

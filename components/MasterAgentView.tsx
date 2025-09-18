@@ -1,12 +1,12 @@
-
 import React, { useState } from 'react';
-import { MasterAgent, Agent, Transaction, CoinRequest, AllUserTypes, Message } from '../types';
+import { MasterAgent, Agent, Transaction, CoinRequest, AllUserTypes, Message, UserRole } from '../types';
 import TransactionHistory from './TransactionHistory';
 import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
 import Card from './common/Card';
 import RequestCoinsModal from './RequestCoinsModal';
-import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
+import CreateAgentModal from './CreateAgentModal';
+import { UsersIcon, ChatBubbleLeftEllipsisIcon, UserPlusIcon } from './common/Icons';
 
 interface MasterAgentViewProps {
   currentUser: MasterAgent;
@@ -16,6 +16,7 @@ interface MasterAgentViewProps {
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onCreateCoinRequest: (amount: number) => Promise<string | null>; // Request to Operator
   onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
+  onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
   messages: { [userId: string]: Message[] };
   allUsers: { [id:string]: AllUserTypes };
 }
@@ -28,11 +29,13 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   onRespondToRequest,
   onCreateCoinRequest,
   onSendMessage,
+  onCreateAgent,
   messages,
   allUsers
 }) => {
   const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
   const [isRequestModalOpen, setRequestModalOpen] = useState(false);
+  const [isCreateAgentModalOpen, setCreateAgentModalOpen] = useState(false);
 
   const handleSendMessage = async (text: string, amount: number) => {
     if (chatTargetUser) {
@@ -44,14 +47,23 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
     <>
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center flex-wrap gap-2">
                  <h2 className="text-2xl font-bold text-gray-200">Master Agent Dashboard</h2>
-                 <button 
-                    onClick={() => setRequestModalOpen(true)}
-                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
-                 >
-                     Request Coins from Operator
-                 </button>
+                 <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setCreateAgentModalOpen(true)}
+                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
+                    >
+                        <UserPlusIcon className="w-5 h-5" />
+                        Create Agent
+                    </button>
+                    <button 
+                        onClick={() => setRequestModalOpen(true)}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                    >
+                        Request Coins
+                    </button>
+                 </div>
             </div>
           <Card>
             <div className="p-4 border-b border-gray-700 flex items-center space-x-2">
@@ -63,9 +75,12 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                     <ul className="divide-y divide-gray-800">
                         {agents.map(agent => (
                             <li key={agent.id} className="p-3 flex justify-between items-center">
-                                <div>
+                                <div className="flex-grow">
                                     <p className="font-semibold text-gray-300">{agent.name}</p>
-                                    <p className="text-sm text-yellow-400">{agent.coinBalance.toLocaleString()} C</p>
+                                    <div className="text-sm flex gap-4">
+                                        <p className="text-yellow-400">Coins: {agent.coinBalance.toLocaleString()}</p>
+                                        <p className="text-green-400">Commission: {agent.commissionBalance.toLocaleString()}</p>
+                                    </div>
                                 </div>
                                 <button
                                     onClick={() => setChatTargetUser(agent)}
@@ -87,17 +102,17 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
             <Card>
                  <div className="p-4 grid grid-cols-2 gap-4">
                     <div>
-                        <h4 className="text-sm text-gray-400">Commission Balance</h4>
+                        <h4 className="text-sm text-gray-400">My Commission</h4>
                         <p className="text-2xl font-bold text-green-400">{currentUser.commissionBalance.toLocaleString()}</p>
                     </div>
                      <div>
-                        <h4 className="text-sm text-gray-400">Commission Rate</h4>
+                        <h4 className="text-sm text-gray-400">Comm. Rate</h4>
                         <p className="text-2xl font-bold text-gray-300">{(currentUser.commissionRate * 100).toFixed(0)}%</p>
                     </div>
                  </div>
             </Card>
           <PendingCoinRequests
-            requests={coinRequests}
+            requests={coinRequests.filter(r => r.status === 'PENDING')}
             onRespond={onRespondToRequest}
             allUsers={allUsers}
             title="Agent Coin Requests"
@@ -117,6 +132,12 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
           <RequestCoinsModal 
             onClose={() => setRequestModalOpen(false)}
             onSubmit={onCreateCoinRequest}
+          />
+      )}
+      {isCreateAgentModalOpen && (
+          <CreateAgentModal
+            onClose={() => setCreateAgentModalOpen(false)}
+            onSubmit={onCreateAgent}
           />
       )}
     </>

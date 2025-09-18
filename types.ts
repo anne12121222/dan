@@ -35,6 +35,8 @@ export interface Agent {
     role: UserRole.AGENT;
     masterAgentId: string;
     coinBalance: number;
+    // FIX: Add missing 'commissionBalance' property to align with database schema and UI requirements.
+    commissionBalance: number;
     commissionRate: number; // e.g., 0.07 for 7%
     transferFee: number;   // e.g., 0.01 for 1%
 }
