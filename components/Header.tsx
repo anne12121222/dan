@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { AllUserTypes } from '../types';
-import { CoinIcon, Bars3Icon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution issue.
+import { AllUserTypes } from '../types.ts';
+import { CoinIcon, Bars3Icon } from './common/Icons.tsx';
 
 interface HeaderProps {
   currentUser: AllUserTypes;

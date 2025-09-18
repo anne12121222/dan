@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { BetChoice } from '../types';
-import { XMarkIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { BetChoice } from '../types.ts';
+import { XMarkIcon } from './common/Icons.tsx';
 
 interface BettingModalProps {
   choice: BetChoice;

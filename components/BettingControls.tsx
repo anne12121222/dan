@@ -1,7 +1,8 @@
 // Grand Overhaul: This component is now fully functional and disables correctly.
 import React, { useState } from 'react';
-import { BetChoice, FightStatus, Bet } from '../types';
-import BettingModal from './BettingModal';
+// FIX: Add .ts extension to fix module resolution.
+import { BetChoice, FightStatus, Bet } from '../types.ts';
+import BettingModal from './BettingModal.tsx';
 
 interface BettingControlsProps {
   status: FightStatus;

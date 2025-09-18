@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { AllUserTypes, Message, UserRole } from '../types';
-import { XMarkIcon, PaperAirplaneIcon, CoinIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { AllUserTypes, Message, UserRole } from '../types.ts';
+import { XMarkIcon, PaperAirplaneIcon, CoinIcon } from './common/Icons.tsx';
 
 interface ChatModalProps {
   currentUser: AllUserTypes;

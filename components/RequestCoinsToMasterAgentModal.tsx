@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
-import { XMarkIcon } from './common/Icons';
-import { MasterAgent } from '../types';
+import { XMarkIcon } from './common/Icons.tsx';
+// FIX: Add .ts extension to fix module resolution.
+import { MasterAgent } from '../types.ts';
 
 interface RequestCoinsToMasterAgentModalProps {
   onClose: () => void;

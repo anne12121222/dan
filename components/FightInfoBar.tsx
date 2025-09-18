@@ -1,6 +1,7 @@
 // Grand Overhaul: This component now displays a "CLOSING SOON" warning.
 import React from 'react';
-import { FightStatus } from '../types';
+// FIX: Add .ts extension to fix module resolution.
+import { FightStatus } from '../types.ts';
 
 interface FightInfoBarProps {
   // FIX: Allow fightId to be null for the initial state where no fight exists.

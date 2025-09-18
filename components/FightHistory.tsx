@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { PlayerFightHistoryEntry, FightResult } from '../types';
-import { ChevronDownIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { PlayerFightHistoryEntry, FightResult } from '../types.ts';
+import { ChevronDownIcon } from './common/Icons.tsx';
 
 interface FightHistoryProps {
   fightHistory: PlayerFightHistoryEntry[];

@@ -1,17 +1,12 @@
-
 import React, { useState } from 'react';
+import { AuthViewProps } from '../types.ts';
 
-interface AuthViewProps {
-  onLogin: (email: string, password: string) => Promise<string | null>;
-  onRegister: (name: string, email: string, password: string) => Promise<string | null>;
-  isSupabaseConfigured: boolean;
-}
-
-const AuthView: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConfigured }) => {
+const AuthView: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConfigured, agents }) => {
   const [isLoginView, setIsLoginView] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [agentId, setAgentId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,8 +18,12 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConf
     if (isLoginView) {
       result = await onLogin(email, password);
     } else {
-      // Player registers without an agent initially.
-      result = await onRegister(name, email, password);
+      if (!agentId) {
+          setError("Please select an agent.");
+          setLoading(false);
+          return;
+      }
+      result = await onRegister(name, email, password, agentId);
     }
     if (result) {
       setError(result);
@@ -68,16 +67,32 @@ const AuthView: React.FC<AuthViewProps> = ({ onLogin, onRegister, isSupabaseConf
             {error && <p className="bg-red-500/10 text-red-400 text-sm p-3 rounded-md">{error}</p>}
             
             {!isLoginView && (
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  className="w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    className="w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Select Your Agent</label>
+                  <select
+                    value={agentId}
+                    onChange={(e) => setAgentId(e.target.value)}
+                    required
+                    className="w-full bg-zinc-700 text-white p-2 rounded border border-zinc-600 focus:ring-2 focus:ring-red-500 focus:outline-none transition"
+                  >
+                    <option value="" disabled>-- Choose an Agent --</option>
+                    {agents.map(agent => (
+                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
             )}
 
             <div>

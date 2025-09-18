@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import Card from './common/Card';
-import { PlusCircleIcon } from './common/Icons';
+import Card from './common/Card.tsx';
+import { PlusCircleIcon } from './common/Icons.tsx';
 
 interface AddUpcomingFightFormProps {
   onAddFight: (red: string, white: string) => Promise<string | null>;

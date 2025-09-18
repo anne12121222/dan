@@ -1,7 +1,8 @@
 import React from 'react';
-import { Transaction, AllUserTypes } from '../types';
-import Card from './common/Card';
-import { HistoryIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { Transaction, AllUserTypes } from '../types.ts';
+import Card from './common/Card.tsx';
+import { HistoryIcon } from './common/Icons.tsx';
 
 interface TransactionHistoryProps {
     title: string;

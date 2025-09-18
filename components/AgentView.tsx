@@ -1,158 +1,143 @@
-import React, { useState } from 'react';
-import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message, Bet, FightResult, MasterAgent, UserRole } from '../types';
-import TransactionHistory from './TransactionHistory';
-import PendingCoinRequests from './PendingCoinRequests';
-import ChatModal from './ChatModal';
-import Card from './common/Card';
-import RequestCoinsToMasterAgentModal from './RequestCoinsToMasterAgentModal';
-import { UsersIcon, CoinTransferIcon } from './common/Icons';
-import LiveBetsList from './LiveBetsList';
-import Trends from './Trends';
 
-interface AgentViewProps {
-  currentUser: Agent;
-  players: Player[];
-  transactions: Transaction[];
-  coinRequests: CoinRequest[];
-  onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
-  onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
-  onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
-  messages: { [userId: string]: Message[] };
-  allUsers: { [id: string]: AllUserTypes };
-  onOpenChat: (user: AllUserTypes) => void;
-  chatTargetUser: AllUserTypes | null;
-  onCloseChat: () => void;
-  fightId: number | null;
-  currentBets: Bet[];
-  fightHistory: FightResult[];
-}
+import React, { useState, useMemo } from 'react';
+import { Agent, Player, AllUserTypes, UserRole, Transaction, CoinRequest, MasterAgent, AgentViewProps } from '../types.ts';
+import Card from './common/Card.tsx';
+import { UsersIcon, CoinTransferIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
+import TransactionHistory from './TransactionHistory.tsx';
+import PendingCoinRequests from './PendingCoinRequests.tsx';
+import RequestCoinsModal from './RequestCoinsModal.tsx';
+// FIX: Import Trends component.
+import Trends from './Trends.tsx';
 
 const AgentView: React.FC<AgentViewProps> = ({
   currentUser,
-  players,
+  players, // Use the pre-filtered list
   transactions,
   coinRequests,
+  allUsers,
+  onTransferCoins,
   onRespondToRequest,
   onCreateCoinRequest,
-  onSendMessage,
-  messages,
-  allUsers,
-  onOpenChat,
-  chatTargetUser,
-  onCloseChat,
-  fightId,
-  currentBets,
-  fightHistory
+  onMasquerade,
+  onOpenChat
 }) => {
+  const [isTransferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<Player | null>(null);
   const [isRequestModalOpen, setRequestModalOpen] = useState(false);
 
-  const handleSendMessage = async (text: string, amount: number) => {
-    if (chatTargetUser) {
-        await onSendMessage(chatTargetUser.id, text, amount);
-    }
+  const myMasterAgent = useMemo(() => {
+      return allUsers[currentUser.masterAgentId] as MasterAgent | undefined;
+  }, [allUsers, currentUser.masterAgentId]);
+
+  const handleOpenTransferModal = (player: Player) => {
+    setTransferTarget(player);
+    setTransferModalOpen(true);
   };
-
-  const masterAgent = allUsers[currentUser.masterAgentId];
-  const masterAgents = Object.values(allUsers).filter(u => u.role === UserRole.MASTER_AGENT) as MasterAgent[];
-
-  // FIX: Create a more robust filter that explicitly checks the sender's role. This guarantees that an agent's
-  // own outgoing requests (to Master Agents) will not appear in the list intended for incoming player requests.
-  const playerCoinRequests = coinRequests.filter(r => {
-    const fromUser = allUsers[r.from_user_id];
-    return r.status === 'PENDING' && 
-           r.to_user_id === currentUser.id && 
-           fromUser?.role === UserRole.PLAYER;
-  });
-
+  
+  const handleTransferSubmit = async (amount: number) => {
+    if (!transferTarget) return "No target selected";
+    const result = await onTransferCoins(transferTarget.id, amount);
+    if (!result) {
+      setTransferModalOpen(false);
+      return null;
+    }
+    return result;
+  };
+  
   return (
     <>
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-            <div className="flex justify-between items-center flex-wrap gap-2">
-                 <h2 className="text-2xl font-bold text-gray-200">Agent Dashboard</h2>
-                 <div className="flex items-center gap-2">
-                    {masterAgent && (
-                         <button 
-                            onClick={() => onOpenChat(masterAgent)}
-                            className="bg-zinc-600 hover:bg-zinc-700 text-white font-bold py-2 px-4 rounded-lg transition"
-                         >
-                             Chat with Master Agent
-                         </button>
-                    )}
-                     <button 
-                        onClick={() => setRequestModalOpen(true)}
-                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
-                     >
-                         Request Coins
-                     </button>
-                 </div>
-            </div>
-          <Card>
-            <div className="p-4 border-b border-gray-700 flex items-center space-x-2">
-                <UsersIcon className="w-6 h-6 text-gray-400" />
-                <h3 className="text-lg font-semibold text-gray-200">My Players ({players.length})</h3>
-            </div>
-             <div className="max-h-96 overflow-y-auto">
-                {players.length > 0 ? (
-                    <ul className="divide-y divide-gray-800">
-                        {players.map(player => (
-                            <li key={player.id} className="p-3 flex justify-between items-center">
-                                <div>
-                                    <p className="font-semibold text-gray-300">{player.name}</p>
-                                    <p className="text-sm text-yellow-400">{player.coinBalance.toLocaleString()} C</p>
-                                </div>
-                                <button
-                                    onClick={() => onOpenChat(player)}
-                                    className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300"
-                                    aria-label={`Send coins to ${player.name}`}
-                                >
-                                    <CoinTransferIcon className="w-5 h-5" />
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className="text-gray-500 text-center p-6">You have no players yet.</p>
-                )}
-             </div>
-          </Card>
-           <LiveBetsList bets={currentBets} allUsers={allUsers} fightId={fightId} />
-          <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                    <div className="p-4">
+                        <h3 className="text-lg font-semibold text-gray-200">My Info</h3>
+                        <p className="text-sm text-gray-400">Bet Win Commission Rate: {currentUser.commissionRate * 100}%</p>
+                        <p className="text-sm text-gray-400">Coin Transfer Fee: {currentUser.transferFee * 100}%</p>
+                    </div>
+                </Card>
+                 <PendingCoinRequests 
+                    title="Player Coin Requests"
+                    requests={coinRequests}
+                    onRespond={onRespondToRequest}
+                    allUsers={allUsers}
+                 />
+           </div>
+           
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                    <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+                        <div className="flex items-center space-x-2">
+                            <UsersIcon className="w-6 h-6 text-gray-400" />
+                            <h3 className="text-lg font-semibold text-gray-200">My Players ({players.length})</h3>
+                        </div>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                         {players.length === 0 ? (
+                            <p className="text-center text-gray-500 p-4 text-sm">You have no players yet.</p>
+                         ) : (
+                            <ul className="divide-y divide-gray-800">
+                                {players.map(player => (
+                                    <li key={player.id} className="p-3 flex justify-between items-center">
+                                        <div>
+                                            <p className="font-semibold text-blue-400">{player.name}</p>
+                                            <p className="text-sm text-yellow-400">{player.coinBalance.toLocaleString()} C</p>
+                                        </div>
+                                        <div className="flex items-center space-x-2">
+                                            <button onClick={() => handleOpenTransferModal(player)} className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300">
+                                                <CoinTransferIcon className="w-5 h-5" />
+                                            </button>
+                                            <button onClick={() => onOpenChat(player)} className="p-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-full transition duration-300">
+                                                <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                         )}
+                    </div>
+                </Card>
+              <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
+           </div>
         </div>
         <div className="space-y-6">
-            <Card>
-                 <div className="p-4">
-                    <h3 className="text-lg font-semibold text-gray-200">My Info</h3>
-                     <div className="text-sm text-gray-400 mt-2 space-y-2">
-                        <p>Bet Win Commission Rate: <span className="font-semibold text-gray-300">{(currentUser.commissionRate * 100).toFixed(0)}%</span></p>
-                        <p>Coin Transfer Fee: <span className="font-semibold text-gray-300">{(currentUser.transferFee * 100).toFixed(0)}%</span></p>
-                    </div>
-                 </div>
+           <Card>
+                <div className="p-4">
+                    <button 
+                        onClick={() => setRequestModalOpen(true)}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                      >
+                        Request Coins
+                      </button>
+                </div>
+                <div className="p-4 border-t border-gray-700">
+                   <h3 className="text-lg font-semibold text-gray-200">My Master Agent</h3>
+                    {myMasterAgent ? (
+                        <div className="mt-2 text-sm">
+                            <p className="font-semibold text-purple-400">{myMasterAgent.name}</p>
+                            <p className="text-gray-400">{myMasterAgent.email}</p>
+                        </div>
+                    ) : (
+                        <p className="text-gray-500 mt-2 text-sm">You are not assigned to a master agent.</p>
+                    )}
+                </div>
             </Card>
-          <PendingCoinRequests
-            requests={playerCoinRequests}
-            onRespond={onRespondToRequest}
-            allUsers={allUsers}
-            title="Player Coin Requests"
-          />
-          <Trends fightHistory={fightHistory} />
+            <Trends fightHistory={[]} />
+            {/* Live Bets for Current Fight can be added back if Agents need to see it */}
         </div>
       </div>
-      {chatTargetUser && (
-        <ChatModal
-          currentUser={currentUser}
-          chatTargetUser={chatTargetUser}
-          messages={messages[chatTargetUser.id] || []}
-          onClose={onCloseChat}
-          onSendMessage={handleSendMessage}
-        />
-      )}
-      {isRequestModalOpen && (
-          <RequestCoinsToMasterAgentModal 
+      
+       {isRequestModalOpen && (
+          <RequestCoinsModal 
             onClose={() => setRequestModalOpen(false)}
             onSubmit={onCreateCoinRequest}
-            masterAgents={masterAgents}
           />
+      )}
+       {isTransferModalOpen && transferTarget && (
+        <RequestCoinsModal
+            onClose={() => setTransferModalOpen(false)}
+            onSubmit={handleTransferSubmit}
+        />
       )}
     </>
   );

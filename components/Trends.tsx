@@ -1,5 +1,6 @@
 import React from 'react';
-import { FightResult } from '../types';
+// FIX: Add .ts extension to fix module resolution.
+import { FightResult } from '../types.ts';
 
 interface TrendsProps {
   fightHistory: FightResult[];

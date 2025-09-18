@@ -1,7 +1,8 @@
 import React from 'react';
-import { CoinRequest, AllUserTypes } from '../types';
-import Card from './common/Card';
-import { CheckCircleIcon, XCircleIcon, CoinIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { CoinRequest, AllUserTypes } from '../types.ts';
+import Card from './common/Card.tsx';
+import { CheckCircleIcon, XCircleIcon, CoinIcon } from './common/Icons.tsx';
 
 interface PendingCoinRequestsProps {
   requests: CoinRequest[];

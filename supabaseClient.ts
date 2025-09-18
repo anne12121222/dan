@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Database } from './database.types';
+// FIX: Add .ts extension to fix module resolution.
+import { Database } from './database.types.ts';
 
 // IMPORTANT: Replace with your actual Supabase project URL and anon key
 // FIX: Added explicit string type to prevent TypeScript from inferring a literal type, which caused a comparison error.

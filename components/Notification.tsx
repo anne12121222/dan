@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircleIcon, XCircleIcon } from './common/Icons';
+import { CheckCircleIcon, XCircleIcon } from './common/Icons.tsx';
 
 interface NotificationProps {
   message: string;

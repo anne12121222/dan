@@ -1,14 +1,15 @@
 import React from 'react';
-import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner, UserRole, MasterAgent, Agent, Message } from '../types';
-import LiveFeed from './LiveFeed';
-import WinnerDeclaration from './WinnerDeclaration';
-import CompletedFightsList from './CompletedFightsList';
-import UpcomingFightsList from './UpcomingFightsList';
-import LiveBetsList from './LiveBetsList';
-import AddUpcomingFightForm from './AddUpcomingFightForm';
-import Card from './common/Card';
-import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
-import Trends from './Trends';
+// FIX: Add .ts extension to fix module resolution.
+import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner, UserRole, MasterAgent, Agent, Message } from '../types.ts';
+import LiveFeed from './LiveFeed.tsx';
+import WinnerDeclaration from './WinnerDeclaration.tsx';
+import CompletedFightsList from './CompletedFightsList.tsx';
+import UpcomingFightsList from './UpcomingFightsList.tsx';
+import LiveBetsList from './LiveBetsList.tsx';
+import AddUpcomingFightForm from './AddUpcomingFightForm.tsx';
+import Card from './common/Card.tsx';
+import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
+import Trends from './Trends.tsx';
 
 interface OperatorViewProps {
   currentUser: Operator;

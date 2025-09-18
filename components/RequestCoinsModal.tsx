@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { XMarkIcon } from './common/Icons';
+import { XMarkIcon } from './common/Icons.tsx';
 
 interface RequestCoinsModalProps {
   onClose: () => void;

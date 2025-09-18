@@ -1,6 +1,7 @@
 import React from 'react';
-import { UpcomingFight } from '../types';
-import { XMarkIcon } from './common/Icons';
+// FIX: Add .ts extension to fix module resolution.
+import { UpcomingFight } from '../types.ts';
+import { XMarkIcon } from './common/Icons.tsx';
 
 interface UpcomingFightsDrawerProps {
   isOpen: boolean;

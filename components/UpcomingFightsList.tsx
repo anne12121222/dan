@@ -1,7 +1,8 @@
 import React from 'react';
-import Card from './common/Card';
-import { VideoCameraIcon } from './common/Icons';
-import { UpcomingFight } from '../types';
+import Card from './common/Card.tsx';
+import { VideoCameraIcon } from './common/Icons.tsx';
+// FIX: Add .ts extension to fix module resolution.
+import { UpcomingFight } from '../types.ts';
 
 interface UpcomingFightsListProps {
   fights: UpcomingFight[];

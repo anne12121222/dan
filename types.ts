@@ -1,4 +1,4 @@
-// Enums matching the database schema
+// Enums
 export enum UserRole {
   OPERATOR = 'OPERATOR',
   MASTER_AGENT = 'MASTER_AGENT',
@@ -7,36 +7,23 @@ export enum UserRole {
 }
 
 export enum FightStatus {
-  BETTING_OPEN = 'BETTING_OPEN',
-  BETTING_CLOSED = 'BETTING_CLOSED',
-  SETTLED = 'SETTLED',
+  SETTLED = 'SETTLED', // Waiting for operator to start
+  BETTING_OPEN = 'BETTING_OPEN', // Bets can be placed
+  BETTING_CLOSED = 'BETTING_CLOSED', // Bets are locked, fight in progress
 }
 
-export enum TransactionType {
-  TRANSFER = 'TRANSFER',
-  COMMISSION = 'COMMISSION',
-  MINT = 'MINT',
-  BET_WIN = 'BET_WIN',
-  BET_PLACE = 'BET_PLACE',
-  BET_REFUND = 'BET_REFUND',
-}
+export type BetChoice = 'RED' | 'WHITE';
+export type FightWinner = BetChoice | 'DRAW' | 'CANCELLED';
 
-export enum RequestStatus {
-  PENDING = 'PENDING',
-  APPROVED = 'APPROVED',
-  DECLINED = 'DECLINED',
-}
-
-// Base User type
-export interface BaseUser {
-  id: string;
+// Base User
+interface BaseUser {
+  id: string; // UUID from Supabase Auth
   name: string;
   email: string;
-  role: UserRole;
   coinBalance: number;
 }
 
-// Specific User types
+// User Roles
 export interface Player extends BaseUser {
   role: UserRole.PLAYER;
   agentId: string | null;
@@ -44,7 +31,7 @@ export interface Player extends BaseUser {
 
 export interface Agent extends BaseUser {
   role: UserRole.AGENT;
-  masterAgentId: string | null; // Can be unassigned
+  masterAgentId: string;
   commissionBalance: number;
   commissionRate: number;
   transferFee: number;
@@ -61,27 +48,10 @@ export interface Operator extends BaseUser {
   role: UserRole.OPERATOR;
 }
 
-// Union type for any user
+// Union Type for any user
 export type AllUserTypes = Player | Agent | MasterAgent | Operator;
 
-// Fight and Betting types
-export type BetChoice = 'RED' | 'WHITE';
-export type FightWinner = 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED';
-
-export interface UpcomingFight {
-  id: number;
-  participants: {
-    red: string;
-    white: string;
-  };
-}
-
-export interface FightResult {
-  id: number;
-  winner: FightWinner | null;
-  commission: number;
-}
-
+// Betting & Fights
 export interface Bet {
   id: string;
   userId: string;
@@ -90,18 +60,34 @@ export interface Bet {
   choice: BetChoice;
 }
 
+export interface UpcomingFight {
+  id: number;
+  participants: {
+    red: string;
+    white: string;
+  };
+  status: 'UPCOMING';
+}
+
+export interface FightResult {
+  id: number;
+  winner: FightWinner;
+  commission: number; // For operator/MA view
+}
+
+// For player-specific history
 export interface PlayerFightHistoryEntry extends FightResult {
   bet: Bet | null;
   outcome: 'WIN' | 'LOSS' | 'REFUND' | null;
 }
 
-// Financial types
+// Transactions & Requests
 export interface Transaction {
   id: string;
-  from_user_id: string | null;
-  to_user_id: string | null;
+  from_user_id: string | null; // null for MINT
+  to_user_id: string;
   amount: number;
-  type: TransactionType;
+  type: 'MINT' | 'TRANSFER' | 'COMMISSION';
   transaction_timestamp: string;
 }
 
@@ -110,64 +96,65 @@ export interface CoinRequest {
   from_user_id: string;
   to_user_id: string;
   amount: number;
-  status: RequestStatus;
+  status: 'PENDING' | 'APPROVED' | 'DECLINED';
   created_at: string;
 }
 
-// Communication types
+// Messaging
 export interface Message {
-  id: string;
-  senderId: string;
-  receiverId: string;
-  text: string;
-  amount: number | null;
-  createdAt: string;
+    id: string;
+    senderId: string;
+    receiverId: string;
+    text: string;
+    amount: number;
+    createdAt: string;
 }
 
-// API Notification type
-export interface Notification {
-  id: number;
-  message: string;
-  type: 'success' | 'error';
-}
-
-// Component Prop Types
-export interface BetCounts {
-    red: number;
-    white: number;
+// Component Props
+export interface AuthViewProps {
+  onLogin: (email: string, password: string) => Promise<string | null>;
+  onRegister: (name: string, email: string, password: string, agentId: string) => Promise<string | null>;
+  isSupabaseConfigured: boolean;
+  agents: Agent[];
 }
 
 export interface PlayerViewProps {
-    currentUser: Player;
-    fightStatus: FightStatus;
-    fightId: number | null;
-    timer: number;
-    currentBet: Bet | null;
-    bettingPools: { meron: number; wala: number };
-    playerFightHistory: PlayerFightHistoryEntry[];
-    upcomingFights: UpcomingFight[];
-    fightHistory: FightResult[];
-    allUsers: { [id: string]: AllUserTypes };
-    onPlaceBet: (amount: number, choice: 'RED' | 'WHITE') => Promise<string | null>;
-    onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
-    betCounts: BetCounts;
+  currentUser: Player;
+  fightStatus: FightStatus;
+  fightId: number | null;
+  timer: number;
+  currentBet: Bet | null;
+  bettingPools: { meron: number; wala: number };
+  playerFightHistory: PlayerFightHistoryEntry[];
+  fightHistory: FightResult[]; // For Trends component
+  allUsers: { [id: string]: AllUserTypes }; // Keep this for looking up agent name
+  onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
+  onCreateCoinRequest: (amount: number) => Promise<string | null>;
+  betCounts: { red: number; white: number };
+}
+
+export interface AgentViewProps {
+  currentUser: Agent;
+  players: Player[];
+  transactions: Transaction[];
+  coinRequests: CoinRequest[];
+  allUsers: { [id: string]: AllUserTypes }; // Keep for name lookups
+  onTransferCoins: (receiverId: string, amount: number) => Promise<string | null>;
+  onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
+  onCreateCoinRequest: (amount: number) => Promise<string | null>;
+  onMasquerade: (userId: string) => void;
+  onOpenChat: (user: AllUserTypes) => void;
 }
 
 export interface MasterAgentViewProps {
-    currentUser: MasterAgent;
-    agents: Agent[];
-    players: Player[];
-    transactions: Transaction[];
-    coinRequests: CoinRequest[];
-    onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
-    onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
-    onSendMessage: (receiverId: string, text: string, amount: number) => Promise<void>;
-    messages: { [userId: string]: Message[] };
-    allUsers: { [id: string]: AllUserTypes };
-    onOpenChat: (user: AllUserTypes) => void;
-    chatTargetUser: AllUserTypes | null;
-    onCloseChat: () => void;
-    fightStatus: FightStatus;
-    fightId: number | null;
-    betCounts: BetCounts;
+  currentUser: MasterAgent;
+  agents: Agent[];
+  transactions: Transaction[];
+  coinRequests: CoinRequest[];
+  allUsers: { [id: string]: AllUserTypes }; // Keep for name lookups
+  onTransferCoins: (receiverId: string, amount: number) => Promise<string | null>;
+  onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
+  onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
+  onMasquerade: (userId: string) => void;
+  onOpenChat: (user: AllUserTypes) => void;
 }

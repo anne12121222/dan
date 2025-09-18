@@ -1,7 +1,8 @@
 import React from 'react';
-import Card from './common/Card';
-import { HistoryIcon } from './common/Icons';
-import { FightResult, UserRole } from '../types';
+import Card from './common/Card.tsx';
+import { HistoryIcon } from './common/Icons.tsx';
+// FIX: Add .ts extension to fix module resolution.
+import { FightResult, UserRole } from '../types.ts';
 
 interface CompletedFightsListProps {
   fights: FightResult[];

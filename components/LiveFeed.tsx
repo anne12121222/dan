@@ -1,10 +1,8 @@
-
-
-
 import React from 'react';
 // FIX: Widen type to handle all possible fight outcomes.
-import { FightStatus, FightWinner } from '../types';
-import FightInfoBar from './FightInfoBar';
+// FIX: Add .ts extension to fix module resolution.
+import { FightStatus, FightWinner } from '../types.ts';
+import FightInfoBar from './FightInfoBar.tsx';
 
 interface LiveFeedProps {
   fightStatus: FightStatus;

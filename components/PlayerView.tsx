@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Player, FightStatus, Bet, PlayerFightHistoryEntry, UpcomingFight, FightResult, AllUserTypes, UserRole, Agent, PlayerViewProps } from '../types';
-import LiveFeed from './LiveFeed';
-import BettingControls from './BettingControls';
-import BettingPools from './BettingPools';
-import FightHistory from './FightHistory';
-import Trends from './Trends';
-import Card from './common/Card';
-import RequestCoinsToAgentModal from './RequestCoinsToAgentModal';
-import LiveBetCounts from './LiveBetCounts';
+import { Player, FightStatus, PlayerViewProps, UserRole } from '../types.ts';
+import LiveFeed from './LiveFeed.tsx';
+import BettingControls from './BettingControls.tsx';
+import BettingPools from './BettingPools.tsx';
+import FightHistory from './FightHistory.tsx';
+import Trends from './Trends.tsx';
+import Card from './common/Card.tsx';
+import RequestCoinsModal from './RequestCoinsModal.tsx'; // Use the simple modal
+import LiveBetCounts from './LiveBetCounts.tsx';
 
 const PlayerView: React.FC<PlayerViewProps> = ({
   currentUser,
@@ -31,11 +31,6 @@ const PlayerView: React.FC<PlayerViewProps> = ({
     }
     return null;
   }, [currentUser.agentId, allUsers]);
-
-  const availableAgents = useMemo(() => 
-    Object.values(allUsers).filter(u => u.role === UserRole.AGENT) as Agent[],
-    [allUsers]
-  );
   
   return (
     <>
@@ -68,9 +63,10 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                     )}
                     <button 
                       onClick={() => setRequestModalOpen(true)}
-                      className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition"
+                      disabled={!agent}
+                      className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-red-800/50 disabled:cursor-not-allowed"
                     >
-                      Request Coins
+                      {agent ? 'Request Coins' : 'Assign an Agent to Request Coins'}
                     </button>
                 </div>
             </Card>
@@ -79,10 +75,9 @@ const PlayerView: React.FC<PlayerViewProps> = ({
         </div>
       </div>
        {isRequestModalOpen && (
-          <RequestCoinsToAgentModal 
+          <RequestCoinsModal 
             onClose={() => setRequestModalOpen(false)}
             onSubmit={onCreateCoinRequest}
-            agents={availableAgents}
           />
       )}
     </>

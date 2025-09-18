@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { XMarkIcon } from './common/Icons';
-import { Agent } from '../types';
+import { XMarkIcon } from './common/Icons.tsx';
+// FIX: Add .ts extension to fix module resolution.
+import { Agent } from '../types.ts';
 
 interface RequestCoinsToAgentModalProps {
   onClose: () => void;

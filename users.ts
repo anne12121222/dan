@@ -1,4 +1,5 @@
-import { UserRole, Player, Agent, MasterAgent, Operator, AllUserTypes } from './types';
+// FIX: Add .ts extension to fix module resolution.
+import { UserRole, Player, Agent, MasterAgent, Operator, AllUserTypes } from './types.ts';
 
 // NOTE: This file is now for reference and seeding data only.
 // In the live application, user data is managed by Supabase Auth and the 'profiles' table.

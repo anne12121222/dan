@@ -1,10 +1,8 @@
-
-
-
 import React, { useState, useEffect } from 'react';
-import Card from './common/Card';
-import { Bet, AllUserTypes, BetChoice } from '../types';
-import { supabase } from '../supabaseClient';
+import Card from './common/Card.tsx';
+// FIX: Add .ts extension to fix module resolution.
+import { Bet, AllUserTypes, BetChoice } from '../types.ts';
+import { supabase } from '../supabaseClient.ts';
 
 // Type for the raw bet data from Supabase subscription, matching the DB schema
 interface SupabaseBetPayload {
