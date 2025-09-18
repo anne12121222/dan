@@ -7,11 +7,13 @@ DROP FUNCTION IF EXISTS public.sync_public_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
+DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.add_upcoming_fight(text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS public.get_transactions_for_user() CASCADE;
 DROP FUNCTION IF EXISTS public.get_coin_requests_for_user() CASCADE;
 DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
+DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
 DROP FUNCTION IF EXISTS public.place_bet(integer, numeric, public.bet_choice) CASCADE;
 DROP FUNCTION IF EXISTS public.start_next_fight() CASCADE;
 DROP FUNCTION IF EXISTS public.close_betting(integer) CASCADE;
@@ -62,6 +64,16 @@ CREATE TABLE public.profiles (
     master_agent_id uuid REFERENCES public.profiles(id)
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- NEW: Definitive RLS Policy for profiles, replacing all old recursive policies.
+CREATE POLICY "Allow hierarchical read access" ON public.profiles FOR SELECT TO authenticated USING (
+    -- A user can see themself
+    id = auth.uid()
+    -- A master agent can see their agents
+    OR master_agent_id = auth.uid()
+    -- An agent can see their players
+    OR agent_id = auth.uid()
+);
 
 -- STEP 4: Create other application tables with hardened RLS.
 CREATE TABLE public.fights (
@@ -176,50 +188,19 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 
 -- STEP 7: Create database functions (RPC).
 
--- NEW: Secure helper functions to prevent RLS recursion.
-CREATE OR REPLACE FUNCTION public.get_my_role()
-RETURNS public.user_role AS $$
-DECLARE
-  my_role public.user_role;
+-- NEW: Function for operator to see all users, bypassing RLS.
+CREATE OR REPLACE FUNCTION public.get_all_users_for_operator()
+RETURNS SETOF public.profiles AS $$
 BEGIN
-  SELECT role INTO my_role FROM public.profiles WHERE id = auth.uid();
-  RETURN my_role;
+    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
+        RAISE EXCEPTION 'Only operators can access this function.';
+    END IF;
+    RETURN QUERY SELECT * FROM public.profiles;
 END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-CREATE OR REPLACE FUNCTION public.get_my_agent_id()
-RETURNS uuid AS $$
-DECLARE
-  my_agent_id uuid;
-BEGIN
-  SELECT agent_id INTO my_agent_id FROM public.profiles WHERE id = auth.uid();
-  RETURN my_agent_id;
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-CREATE OR REPLACE FUNCTION public.get_my_master_agent_id()
-RETURNS uuid AS $$
-DECLARE
-  my_master_agent_id uuid;
-BEGIN
-  SELECT master_agent_id INTO my_master_agent_id FROM public.profiles WHERE id = auth.uid();
-  RETURN my_master_agent_id;
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
--- NEW: Definitive RLS Policy for profiles, replacing all old recursive policies.
-CREATE POLICY "Allow authenticated read access based on role and hierarchy"
-ON public.profiles FOR SELECT TO authenticated USING (
-  (public.get_my_role() = 'OPERATOR') OR
-  (id = auth.uid()) OR
-  (master_agent_id = auth.uid()) OR
-  (agent_id = auth.uid()) OR
-  (id = public.get_my_agent_id()) OR
-  (id = public.get_my_master_agent_id())
-);
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
--- Function to get agents for registration, avoiding all RLS recursion issues.
+-- Function to get agents for registration.
 CREATE OR REPLACE FUNCTION public.get_registerable_agents()
 RETURNS TABLE(id uuid, name text) AS $$
 BEGIN
@@ -275,6 +256,30 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         RETURN 'Error: Failed to create agent. ' || SQLERRM;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- NEW: Function for a Master Agent to create a new Operator user
+CREATE OR REPLACE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
+RETURNS text AS $$
+DECLARE
+    caller_role public.user_role;
+    caller_id uuid := auth.uid();
+BEGIN
+    SELECT role INTO caller_role FROM public.profiles WHERE id = caller_id;
+    IF caller_role != 'MASTER_AGENT' THEN
+        RETURN 'Error: Only Master Agents can create Operator users.';
+    END IF;
+
+    PERFORM auth.admin.create_user(p_email, p_password, jsonb_build_object(
+        'name', p_name,
+        'role', 'OPERATOR'
+    ));
+
+    RETURN 'Operator created successfully.';
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN 'Error: Failed to create operator. ' || SQLERRM;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -411,11 +416,11 @@ BEGIN
 
     IF requester_profile.role = 'PLAYER' THEN recipient_id := requester_profile.agent_id;
     ELSIF requester_profile.role = 'AGENT' THEN recipient_id := requester_profile.master_agent_id;
-    ELSIF requester_profile.role = 'MASTER_AGENT' THEN SELECT id INTO recipient_id FROM public.profiles WHERE role = 'OPERATOR' LIMIT 1;
+    ELSIF requester_profile.role = 'MASTER_AGENT' THEN RETURN 'Error: Master Agents cannot request coins.';
     ELSE RETURN 'Error: Operators cannot request coins.';
     END IF;
 
-    IF recipient_id IS NULL THEN RETURN 'Error: Could not find a recipient.'; END IF;
+    IF recipient_id IS NULL THEN RETURN 'Error: Could not find a recipient for your request.'; END IF;
 
     INSERT INTO public.coin_requests (from_user_id, to_user_id, amount) VALUES (auth.uid(), recipient_id, p_amount);
     RETURN NULL;

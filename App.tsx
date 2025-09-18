@@ -44,6 +44,7 @@ const App: React.FC = () => {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [registerableAgents, setRegisterableAgents] = useState<{id: string, name: string}[]>([]);
     const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
+    const [isMasquerading, setIsMasquerading] = useState(false);
     
     const realtimeChannel = useRef<any>(null);
 
@@ -74,9 +75,21 @@ const App: React.FC = () => {
         if (!supabase || !currentUser) return;
         
         // Fetch all users/profiles
-        const { data: profilesData, error: profilesError } = await supabase.from('profiles').select('*');
+        let profilesData;
+        let profilesError;
+        
+        if (currentUser.role === UserRole.OPERATOR) {
+            const { data, error } = await supabase.rpc('get_all_users_for_operator');
+            profilesData = data;
+            profilesError = error;
+        } else {
+            const { data, error } = await supabase.from('profiles').select('*');
+            profilesData = data;
+            profilesError = error;
+        }
+        
         if (profilesError) console.error("Error fetching profiles:", profilesError);
-        else {
+        else if (profilesData){
             const usersMap = profilesData.reduce((acc, p) => {
                 acc[p.id] = mapProfileToUserType(p);
                 return acc;
@@ -187,6 +200,7 @@ const App: React.FC = () => {
             } else {
                 setCurrentUser(null);
                 setAllUsers({});
+                setIsMasquerading(false); // Reset masquerade on logout
             }
             setIsLoading(false);
         };
@@ -377,13 +391,24 @@ const App: React.FC = () => {
         showNotification(data || 'Master Agent created successfully!', 'success');
         return null;
     };
+    
+    const handleCreateOperator = async (name: string, email: string, password: string):Promise<string|null> => {
+        if (!supabase) return "Not connected";
+        const { data, error } = await supabase.rpc('create_operator', { p_name: name, p_email: email, p_password: password });
+        if(error) return handleRpcError(error, "Failed to create operator.");
+        if(data && data.startsWith('Error:')) return data;
+        showNotification(data || 'Operator created successfully!', 'success');
+        return null;
+    };
 
     const renderUserView = () => {
         if (!currentUser) {
             return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
         }
 
-        switch (currentUser.role) {
+        const effectiveRole = isMasquerading && currentUser.role === UserRole.MASTER_AGENT ? UserRole.OPERATOR : currentUser.role;
+
+        switch (effectiveRole) {
             case UserRole.PLAYER:
                 const playerHistory: PlayerFightHistoryEntry[] = fightHistory.map(fh => {
                     const bet = playerBets.find(b => b.fightId === fh.id);
@@ -423,6 +448,8 @@ const App: React.FC = () => {
                         chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
                         fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} 
                         fightHistory={fightHistory} upcomingFights={upcomingFights}
+                        onMasquerade={() => setIsMasquerading(true)}
+                        onCreateOperator={handleCreateOperator}
                     />
                 );
             case UserRole.OPERATOR:
@@ -431,6 +458,9 @@ const App: React.FC = () => {
                         currentUser={currentUser as Operator} fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} fightHistory={fightHistory}
                         upcomingFights={upcomingFights} currentBets={currentBets} allUsers={allUsers} onStartNextFight={handleStartNextFight}
                         onCloseBetting={handleCloseBetting} onDeclareWinner={onDeclareWinner} onAddUpcomingFight={onAddUpcomingFight} onCreateMasterAgent={handleCreateMasterAgent}
+                        onExitMasquerade={isMasquerading ? () => setIsMasquerading(false) : undefined}
+                        onOpenChat={handleOpenChat}
+                        chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)} onSendMessage={onSendMessage} messages={allMessages}
                     />
                 );
             default:

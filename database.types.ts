@@ -262,6 +262,14 @@ export interface Database {
         }
         Returns: string
       }
+      create_operator: {
+        Args: {
+          p_name: string
+          p_email: string
+          p_password: string
+        }
+        Returns: string
+      }
       create_coin_request: {
         Args: {
           p_amount: number
@@ -274,6 +282,21 @@ export interface Database {
           p_winner: "RED" | "WHITE" | "DRAW" | "CANCELLED"
         }
         Returns: undefined
+      }
+      get_all_users_for_operator: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          agent_id: string | null
+          coin_balance: number
+          commission_balance: number
+          commission_rate: number
+          transfer_fee: number
+          email: string
+          id: string
+          master_agent_id: string | null
+          name: string
+          role: "OPERATOR" | "MASTER_AGENT" | "AGENT" | "PLAYER"
+        }[]
       }
       get_coin_requests_for_user: {
         Args: Record<PropertyKey, never>
@@ -297,18 +320,6 @@ export interface Database {
           sender_id: string
           text: string | null
         }[]
-      }
-      get_my_agent_id: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
-      get_my_master_agent_id: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
-      get_my_role: {
-        Args: Record<PropertyKey, never>
-        Returns: "OPERATOR" | "MASTER_AGENT" | "AGENT" | "PLAYER"
       }
       get_registerable_agents: {
         Args: Record<PropertyKey, never>
