@@ -65,22 +65,6 @@ CREATE TABLE public.profiles (
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- NEW: Definitive RLS Policy for profiles, replacing all old recursive policies.
--- FIX: This policy allows users to see themselves, their direct subordinates, AND their direct superiors.
-CREATE POLICY "Allow hierarchical read access" ON public.profiles FOR SELECT TO authenticated USING (
-    -- A user can see themself
-    id = auth.uid() OR
-    -- A master agent can see their agents
-    master_agent_id = auth.uid() OR
-    -- An agent can see their players
-    agent_id = auth.uid() OR
-    -- A player can see their agent
-    id = (SELECT agent_id FROM public.profiles WHERE id = auth.uid()) OR
-    -- An agent can see their master agent
-    id = (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid())
-);
-
-
 -- STEP 4: Create other application tables with hardened RLS.
 CREATE TABLE public.fights (
     id integer PRIMARY KEY,
@@ -194,7 +178,33 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 
 -- STEP 7: Create database functions (RPC).
 
--- NEW: Function for operator to see all users, bypassing RLS.
+-- NEW: Helper functions to break RLS recursion
+CREATE OR REPLACE FUNCTION public.get_my_agent_id()
+RETURNS uuid AS $$
+  SELECT agent_id FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_my_master_agent_id()
+RETURNS uuid AS $$
+  SELECT master_agent_id FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+-- NEW: Definitive RLS Policy for profiles, replacing all old recursive policies.
+CREATE POLICY "Allow hierarchical read access" ON public.profiles FOR SELECT TO authenticated USING (
+    -- A user can see themself
+    id = auth.uid() OR
+    -- A master agent can see their agents
+    master_agent_id = auth.uid() OR
+    -- An agent can see their players
+    agent_id = auth.uid() OR
+    -- A user can see their agent
+    id = public.get_my_agent_id() OR
+    -- A user can see their master agent
+    id = public.get_my_master_agent_id()
+);
+
+
+-- Function for operator to see all users, bypassing RLS.
 CREATE OR REPLACE FUNCTION public.get_all_users_for_operator()
 RETURNS SETOF public.profiles AS $$
 BEGIN
@@ -265,7 +275,7 @@ EXCEPTION
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- NEW: Function for a Master Agent to create a new Operator user
+-- Function for a Master Agent to create a new Operator user
 CREATE OR REPLACE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
 RETURNS text AS $$
 DECLARE
