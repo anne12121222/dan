@@ -1,6 +1,6 @@
 -- Grand Overhaul: Final, Definitive, and 100% Complete Database Script
 -- This script is fully resettable and contains all backend logic for every feature.
--- Replaced the recursive RLS policies with a single, comprehensive policy using secure helper functions.
+-- FIX: Replaced the recursive RLS policies with a single, comprehensive policy and fixed user creation functions.
 
 -- STEP 1: Clean up old objects to ensure a clean slate.
 DROP FUNCTION IF EXISTS public.sync_public_agents() CASCADE;
@@ -66,14 +66,20 @@ CREATE TABLE public.profiles (
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 -- NEW: Definitive RLS Policy for profiles, replacing all old recursive policies.
+-- FIX: This policy allows users to see themselves, their direct subordinates, AND their direct superiors.
 CREATE POLICY "Allow hierarchical read access" ON public.profiles FOR SELECT TO authenticated USING (
     -- A user can see themself
-    id = auth.uid()
+    id = auth.uid() OR
     -- A master agent can see their agents
-    OR master_agent_id = auth.uid()
+    master_agent_id = auth.uid() OR
     -- An agent can see their players
-    OR agent_id = auth.uid()
+    agent_id = auth.uid() OR
+    -- A player can see their agent
+    id = (SELECT agent_id FROM public.profiles WHERE id = auth.uid()) OR
+    -- An agent can see their master agent
+    id = (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid())
 );
+
 
 -- STEP 4: Create other application tables with hardened RLS.
 CREATE TABLE public.fights (
