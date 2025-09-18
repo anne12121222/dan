@@ -31,8 +31,7 @@ DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
--- Drop old, problematic helper functions if they exist
-DROP FUNCTION IF EXISTS public.get_my_role() CASCADE;
+-- Drop the new helper functions if they exist from a previous run
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
 
@@ -109,7 +108,24 @@ CREATE TABLE public.messages (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 4. RLS (ROW LEVEL SECURITY): Secure data access
+-- 4. RLS HELPER FUNCTIONS (NON-RECURSIVE)
+-- These functions safely get the current user's data to avoid recursion in RLS policies.
+CREATE FUNCTION public.get_my_agent_id()
+RETURNS uuid AS $$
+BEGIN
+  RETURN (SELECT agent_id FROM public.profiles WHERE id = auth.uid());
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+CREATE FUNCTION public.get_my_master_agent_id()
+RETURNS uuid AS $$
+BEGIN
+  RETURN (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid());
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+
+-- 5. RLS (ROW LEVEL SECURITY): Secure data access
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fights ENABLE ROW LEVEL SECURITY;
@@ -123,27 +139,18 @@ ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public read access to fights" ON public.fights FOR SELECT USING (true);
 CREATE POLICY "Allow public read access to upcoming fights" ON public.upcoming_fights FOR SELECT USING (true);
 
--- A single, robust, non-recursive policy for profiles.
--- Allows users to see themselves, their direct superiors, and their direct subordinates.
+-- DEFINITIVE FIX: A new, non-recursive policy for profiles.
+-- This single policy handles all roles correctly and avoids infinite recursion.
 CREATE POLICY "Allow hierarchical and self read access" ON public.profiles FOR SELECT
 USING (
-  -- Users can see themselves
+  -- 1. A user can see their own profile
   id = auth.uid() OR
-  -- Superiors can see their direct subordinates
-  (
-    id IN (
-      SELECT p.id FROM public.profiles p WHERE
-        (p.agent_id = auth.uid() AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'AGENT') OR
-        (p.master_agent_id = auth.uid() AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'MASTER_AGENT')
-    )
-  ) OR
-  -- Subordinates can see their direct superiors
-  (
-    id IN (
-      (SELECT agent_id FROM public.profiles WHERE id = auth.uid()),
-      (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid())
-    )
-  )
+  -- 2. A user can see their direct subordinates (e.g., Master Agent sees their Agents)
+  master_agent_id = auth.uid() OR
+  agent_id = auth.uid() OR
+  -- 3. A user can see their direct superiors (e.g., an Agent sees their Master Agent)
+  id = public.get_my_agent_id() OR
+  id = public.get_my_master_agent_id()
 );
 
 
@@ -161,34 +168,19 @@ CREATE POLICY "Allow users to see their own data" ON public.transactions FOR SEL
 CREATE POLICY "Allow users to see their own data" ON public.coin_requests FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT USING (sender_id = auth.uid() OR receiver_id = auth.uid());
 
--- Allow operators to manage everything
-CREATE POLICY "Allow operator full access" ON public.profiles FOR ALL
-USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
-
-CREATE POLICY "Allow operator full access" ON public.transactions FOR ALL
-USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
-
-CREATE POLICY "Allow operator full access" ON public.coin_requests FOR ALL
-USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
-
-CREATE POLICY "Allow operator full access" ON public.messages FOR ALL
-USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
-
-CREATE POLICY "Allow operator full access" ON public.upcoming_fights FOR ALL
+-- NOTE: The dangerous recursive operator policy on profiles has been removed.
+-- The app correctly uses an RPC call (`get_all_users_for_operator`) for this functionality.
+CREATE POLICY "Allow operator to manage upcoming fights" ON public.upcoming_fights FOR ALL
 USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
 WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
 
--- 5. TRIGGERS: Automate profile creation
+-- 6. TRIGGERS: Automate profile creation
 -- This version is robust and handles user creation from the Supabase dashboard.
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, name, email, role, agent_id)
+  INSERT INTO public.profiles (id, name, email, role, agent_id, master_agent_id)
   VALUES (
     NEW.id,
     -- Provide a default for name if not in metadata
@@ -196,7 +188,8 @@ BEGIN
     NEW.email,
     -- Default role to PLAYER if not specified
     COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'),
-    (NEW.raw_user_meta_data->>'agent_id')::uuid
+    (NEW.raw_user_meta_data->>'agent_id')::uuid,
+    (NEW.raw_user_meta_data->>'master_agent_id')::uuid
   );
 
   -- Give new players a starting balance
@@ -213,7 +206,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 
--- 6. RPC FUNCTIONS: Define business logic
+-- 7. RPC FUNCTIONS: Define business logic
 -- Operator Functions
 CREATE FUNCTION public.start_next_fight()
 RETURNS void AS $$

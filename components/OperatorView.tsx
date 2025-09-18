@@ -54,8 +54,8 @@ const OperatorView: React.FC<OperatorViewProps> = ({
   const isBettingClosed = fightStatus === FightStatus.BETTING_CLOSED;
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
 
-  const masterAgents = Object.values(allUsers).filter((u: AllUserTypes): u is MasterAgent => u.role === UserRole.MASTER_AGENT);
-  const agents = Object.values(allUsers).filter((u: AllUserTypes): u is Agent => u.role === UserRole.AGENT);
+  const masterAgents = Object.values(allUsers).filter(u => u.role === UserRole.MASTER_AGENT) as MasterAgent[];
+  const agents = Object.values(allUsers).filter(u => u.role === UserRole.AGENT) as Agent[];
 
   return (
     <>
