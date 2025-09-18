@@ -8,6 +8,7 @@ import LiveBetsList from './LiveBetsList';
 import AddUpcomingFightForm from './AddUpcomingFightForm';
 import Card from './common/Card';
 import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
+import Trends from './Trends';
 
 interface OperatorViewProps {
   currentUser: Operator;
@@ -128,6 +129,7 @@ const OperatorView: React.FC<OperatorViewProps> = ({
                     </ul>
                 </div>
             </Card>
+          <Trends fightHistory={fightHistory} />
           <UpcomingFightsList fights={upcomingFights} />
           <CompletedFightsList fights={fightHistory} currentUserRole={currentUser.role} />
         </div>

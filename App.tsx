@@ -323,7 +323,8 @@ const App: React.FC = () => {
 
     const onDeclareWinner = async (winner: FightWinner) => {
         if (!supabase || fightId === null) return;
-        const { error } = await supabase.rpc('declare_winner', { p_fight_id: fightId, p_winner: winner });
+        // FIX: Pass the winner as plain text to avoid enum casting issues in Postgres.
+        const { error } = await supabase.rpc('declare_winner', { p_fight_id: fightId, p_winner_text: winner });
         if(error) handleRpcError(error, "Failed to declare winner.");
         else showNotification(`Fight #${fightId} settled. Winner: ${winner}`, 'success');
     };
@@ -424,6 +425,9 @@ const App: React.FC = () => {
                         transactions={transactions} coinRequests={coinRequests.filter(r => r.to_user_id === currentUser.id || r.from_user_id === currentUser.id)}
                         onRespondToRequest={onRespondToRequest} onCreateCoinRequest={onCreateCoinRequest} onSendMessage={onSendMessage} 
                         messages={allMessages} allUsers={allUsers} onOpenChat={handleOpenChat} chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)}
+                        fightId={fightId}
+                        currentBets={currentBets}
+                        fightHistory={fightHistory}
                     />
                 );
             case UserRole.MASTER_AGENT:
@@ -438,6 +442,7 @@ const App: React.FC = () => {
                         fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} 
                         fightHistory={fightHistory} upcomingFights={upcomingFights}
                         onMasquerade={() => setIsMasquerading(true)}
+                        currentBets={currentBets}
                     />
                 );
             case UserRole.OPERATOR:

@@ -290,7 +290,7 @@ export interface Database {
         Returns: string
       }
       declare_winner: {
-        Args: { p_fight_id: number; p_winner: Database["public"]["Enums"]["fight_winner"] }
+        Args: { p_fight_id: number; p_winner_text: string }
         Returns: undefined
       }
       get_all_users_for_operator: {

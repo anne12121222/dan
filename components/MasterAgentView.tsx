@@ -1,5 +1,5 @@
 import React from 'react';
-import { MasterAgent, Agent, Transaction, CoinRequest, AllUserTypes, Message, UserRole, FightStatus, FightWinner, FightResult, UpcomingFight } from '../types';
+import { MasterAgent, Agent, Transaction, CoinRequest, AllUserTypes, Message, UserRole, FightStatus, FightWinner, FightResult, UpcomingFight, Bet } from '../types';
 import TransactionHistory from './TransactionHistory';
 import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
@@ -8,6 +8,8 @@ import { UsersIcon, CoinTransferIcon } from './common/Icons';
 import LiveFeed from './LiveFeed';
 import UpcomingFightsList from './UpcomingFightsList';
 import CompletedFightsList from './CompletedFightsList';
+import Trends from './Trends';
+import LiveBetsList from './LiveBetsList';
 
 interface MasterAgentViewProps {
   currentUser: MasterAgent;
@@ -28,6 +30,7 @@ interface MasterAgentViewProps {
   fightHistory: FightResult[];
   upcomingFights: UpcomingFight[];
   onMasquerade: () => void; 
+  currentBets: Bet[];
 }
 
 const MasterAgentView: React.FC<MasterAgentViewProps> = ({
@@ -49,6 +52,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   fightHistory,
   upcomingFights,
   onMasquerade,
+  currentBets,
 }) => {
 
   const handleSendMessage = async (text: string, amount: number) => {
@@ -73,6 +77,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                  </div>
             </div>
             <LiveFeed fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} />
+            <LiveBetsList bets={currentBets} allUsers={allUsers} fightId={fightId} />
             <Card>
                 <div className="p-4 border-b border-gray-700 flex items-center space-x-2">
                     <UsersIcon className="w-6 h-6 text-gray-400" />
@@ -125,6 +130,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                 allUsers={allUsers}
                 title="Agent Coin Requests"
             />
+            <Trends fightHistory={fightHistory} />
             <UpcomingFightsList fights={upcomingFights} />
             <CompletedFightsList fights={fightHistory} currentUserRole={currentUser.role} />
             <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />

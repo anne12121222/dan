@@ -1,12 +1,14 @@
 // Grand Overhaul: This component is now fully functional and displays commission info.
 import React, { useState } from 'react';
-import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message } from '../types';
+import { Agent, Player, Transaction, CoinRequest, AllUserTypes, Message, Bet, FightResult } from '../types';
 import TransactionHistory from './TransactionHistory';
 import PendingCoinRequests from './PendingCoinRequests';
 import ChatModal from './ChatModal';
 import Card from './common/Card';
 import RequestCoinsModal from './RequestCoinsModal';
 import { UsersIcon, CoinTransferIcon } from './common/Icons';
+import LiveBetsList from './LiveBetsList';
+import Trends from './Trends';
 
 interface AgentViewProps {
   currentUser: Agent;
@@ -21,6 +23,9 @@ interface AgentViewProps {
   onOpenChat: (user: AllUserTypes) => void;
   chatTargetUser: AllUserTypes | null;
   onCloseChat: () => void;
+  fightId: number | null;
+  currentBets: Bet[];
+  fightHistory: FightResult[];
 }
 
 const AgentView: React.FC<AgentViewProps> = ({
@@ -35,7 +40,10 @@ const AgentView: React.FC<AgentViewProps> = ({
   allUsers,
   onOpenChat,
   chatTargetUser,
-  onCloseChat
+  onCloseChat,
+  fightId,
+  currentBets,
+  fightHistory
 }) => {
   const [isRequestModalOpen, setRequestModalOpen] = useState(false);
 
@@ -99,6 +107,7 @@ const AgentView: React.FC<AgentViewProps> = ({
                 )}
              </div>
           </Card>
+           <LiveBetsList bets={currentBets} allUsers={allUsers} fightId={fightId} />
           <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
         </div>
         <div className="space-y-6">
@@ -117,6 +126,7 @@ const AgentView: React.FC<AgentViewProps> = ({
             allUsers={allUsers}
             title="Player Coin Requests"
           />
+          <Trends fightHistory={fightHistory} />
         </div>
       </div>
       {chatTargetUser && (
