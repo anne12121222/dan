@@ -232,7 +232,7 @@ EXCEPTION
     WHEN OTHERS THEN
         RETURN 'Error: Failed to create master agent. ' || SQLERRM;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Function for a Master Agent to create a new Agent user
 CREATE OR REPLACE FUNCTION public.create_agent(p_name text, p_email text, p_password text)
@@ -257,7 +257,7 @@ EXCEPTION
     WHEN OTHERS THEN
         RETURN 'Error: Failed to create agent. ' || SQLERRM;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- NEW: Function for a Master Agent to create a new Operator user
 CREATE OR REPLACE FUNCTION public.create_operator(p_name text, p_email text, p_password text)
@@ -281,7 +281,7 @@ EXCEPTION
     WHEN OTHERS THEN
         RETURN 'Error: Failed to create operator. ' || SQLERRM;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- Function for an Operator to start the next fight

@@ -157,7 +157,17 @@ const App: React.FC = () => {
             else setPlayerBets(allMyBets);
         }
 
-    }, [currentUser]);
+        // FIX: Also refresh messages for the currently open chat window to ensure real-time updates.
+        if (chatTargetUser) {
+            const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: chatTargetUser.id });
+            if (error) {
+                 console.error(`Failed to refresh messages for ${chatTargetUser.name}`, error);
+            } else {
+                setAllMessages(prev => ({...prev, [chatTargetUser.id]: data.map(m => ({ ...m, senderId: m.sender_id, receiverId: m.receiver_id, createdAt: m.created_at })) }));
+            }
+        }
+
+    }, [currentUser, chatTargetUser]);
 
     useEffect(() => {
         const fetchAgentsForRegistration = async () => {
