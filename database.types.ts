@@ -285,20 +285,8 @@ export interface Database {
         Args: { p_fight_id: number }
         Returns: undefined
       }
-      create_agent: {
-        Args: { p_name: string; p_email: string; p_password: string }
-        Returns: string
-      }
       create_coin_request: {
         Args: { p_amount: number }
-        Returns: string
-      }
-      create_master_agent: {
-        Args: { p_name: string; p_email: string; p_password: string }
-        Returns: string
-      }
-      create_operator: {
-        Args: { p_name: string; p_email: string; p_password: string }
         Returns: string
       }
       declare_winner: {
@@ -356,6 +344,10 @@ export interface Database {
           type: Database["public"]["Enums"]["transaction_type"]
           transaction_timestamp: string
         }[]
+      }
+      get_user_view_data: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
       }
       place_bet: {
         Args: {

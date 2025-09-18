@@ -87,7 +87,8 @@ const App: React.FC = () => {
             profilesData = data;
             profilesError = error;
         } else {
-            const { data, error } = await supabase.from('profiles').select('*');
+            // FIX: Call the new, secure RPC function instead of a direct table query to avoid RLS issues.
+            const { data, error } = await supabase.rpc('get_user_view_data');
             profilesData = data;
             profilesError = error;
         }
@@ -389,15 +390,6 @@ const App: React.FC = () => {
         return null;
     };
 
-    const handleCreateMasterAgent = async (name: string, email: string, password: string):Promise<string|null> => {
-        if (!supabase) return "Not connected";
-        const { data, error } = await supabase.rpc('create_master_agent', { p_name: name, p_email: email, p_password: password });
-        if(error) return handleRpcError(error, "Failed to create master agent.");
-        if(data && data.startsWith('Error:')) return data;
-        showNotification(data || 'Master Agent created successfully!', 'success');
-        return null;
-    };
-
     const renderUserView = () => {
         if (!currentUser) {
             return <div className="text-center p-8 text-gray-400">Loading user data...</div>;
@@ -453,7 +445,7 @@ const App: React.FC = () => {
                     <OperatorView
                         currentUser={currentUser as Operator} fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} fightHistory={fightHistory}
                         upcomingFights={upcomingFights} currentBets={currentBets} allUsers={allUsers} onStartNextFight={handleStartNextFight}
-                        onCloseBetting={handleCloseBetting} onDeclareWinner={onDeclareWinner} onAddUpcomingFight={onAddUpcomingFight} onCreateMasterAgent={handleCreateMasterAgent}
+                        onCloseBetting={handleCloseBetting} onDeclareWinner={onDeclareWinner} onAddUpcomingFight={onAddUpcomingFight}
                         onExitMasquerade={isMasquerading ? () => setIsMasquerading(false) : undefined}
                         onOpenChat={handleOpenChat}
                         chatTargetUser={chatTargetUser} onCloseChat={() => setChatTargetUser(null)} onSendMessage={onSendMessage} messages={allMessages}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Operator, FightStatus, FightResult, UpcomingFight, Bet, AllUserTypes, FightWinner, UserRole, MasterAgent, Agent, Message } from '../types';
 import LiveFeed from './LiveFeed';
 import WinnerDeclaration from './WinnerDeclaration';
@@ -6,9 +6,8 @@ import CompletedFightsList from './CompletedFightsList';
 import UpcomingFightsList from './UpcomingFightsList';
 import LiveBetsList from './LiveBetsList';
 import AddUpcomingFightForm from './AddUpcomingFightForm';
-import CreateMasterAgentModal from './CreateMasterAgentModal';
 import Card from './common/Card';
-import { UserPlusIcon, UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
+import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons';
 
 interface OperatorViewProps {
   currentUser: Operator;
@@ -24,7 +23,6 @@ interface OperatorViewProps {
   onCloseBetting: () => void;
   onDeclareWinner: (winner: FightWinner) => void;
   onAddUpcomingFight: (red: string, white: string) => Promise<string | null>;
-  onCreateMasterAgent: (name: string, email: string, password: string) => Promise<string | null>;
   onExitMasquerade?: () => void;
   onOpenChat: (user: AllUserTypes) => void;
   chatTargetUser: AllUserTypes | null;
@@ -47,12 +45,10 @@ const OperatorView: React.FC<OperatorViewProps> = ({
   onCloseBetting,
   onDeclareWinner,
   onAddUpcomingFight,
-  onCreateMasterAgent,
   onExitMasquerade,
   onOpenChat,
 }) => {
   const isBettingClosed = fightStatus === FightStatus.BETTING_CLOSED;
-  const [isCreateModalOpen, setCreateModalOpen] = useState(false);
 
   const masterAgents = Object.values(allUsers).filter(u => u.role === UserRole.MASTER_AGENT) as MasterAgent[];
   const agents = Object.values(allUsers).filter(u => u.role === UserRole.AGENT) as Agent[];
@@ -69,13 +65,6 @@ const OperatorView: React.FC<OperatorViewProps> = ({
                         Return to My Dashboard
                     </button>
                 )}
-                <button
-                    onClick={() => setCreateModalOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition flex items-center gap-2"
-                >
-                    <UserPlusIcon className="w-5 h-5" />
-                    Create Master Agent
-                </button>
             </div>
           </div>
           <LiveFeed fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} />
@@ -143,12 +132,6 @@ const OperatorView: React.FC<OperatorViewProps> = ({
           <CompletedFightsList fights={fightHistory} currentUserRole={currentUser.role} />
         </div>
       </div>
-      {isCreateModalOpen && (
-        <CreateMasterAgentModal 
-          onClose={() => setCreateModalOpen(false)}
-          onSubmit={onCreateMasterAgent}
-        />
-      )}
     </>
   );
 };

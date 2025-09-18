@@ -19,21 +19,24 @@ DROP FUNCTION IF EXISTS public.start_next_fight() CASCADE;
 DROP FUNCTION IF EXISTS public.close_betting(integer) CASCADE;
 DROP FUNCTION IF EXISTS public.declare_winner(integer, public.fight_winner) CASCADE;
 DROP FUNCTION IF EXISTS public.add_upcoming_fight(text, text) CASCADE;
+-- FIX: Drop both old (numeric) and new (integer) function signatures for idempotency
 DROP FUNCTION IF EXISTS public.place_bet(integer, numeric, public.bet_choice) CASCADE;
+DROP FUNCTION IF EXISTS public.place_bet(integer, integer, public.bet_choice) CASCADE;
 DROP FUNCTION IF EXISTS public.create_coin_request(numeric) CASCADE;
+DROP FUNCTION IF EXISTS public.create_coin_request(integer) CASCADE;
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status) CASCADE;
 DROP FUNCTION IF EXISTS public.get_messages(uuid) CASCADE;
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric) CASCADE;
+DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, integer) CASCADE;
 DROP FUNCTION IF EXISTS public.get_transactions_for_user() CASCADE;
 DROP FUNCTION IF EXISTS public.get_coin_requests_for_user() CASCADE;
-DROP FUNCTION IF EXISTS public.create_agent(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.create_master_agent(text, text, text) CASCADE;
-DROP FUNCTION IF EXISTS public.create_operator(text, text, text) CASCADE;
 DROP FUNCTION IF EXISTS public.get_registerable_agents() CASCADE;
 DROP FUNCTION IF EXISTS public.get_all_users_for_operator() CASCADE;
--- Drop the new helper functions if they exist from a previous run
+-- FIX: Drop new helper functions if they exist from a previous run
 DROP FUNCTION IF EXISTS public.get_my_agent_id() CASCADE;
 DROP FUNCTION IF EXISTS public.get_my_master_agent_id() CASCADE;
+DROP FUNCTION IF EXISTS public.get_user_view_data() CASCADE;
 
 
 -- 2. TYPES: Define custom data types
@@ -108,24 +111,7 @@ CREATE TABLE public.messages (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- 4. RLS HELPER FUNCTIONS (NON-RECURSIVE)
--- These functions safely get the current user's data to avoid recursion in RLS policies.
-CREATE FUNCTION public.get_my_agent_id()
-RETURNS uuid AS $$
-BEGIN
-  RETURN (SELECT agent_id FROM public.profiles WHERE id = auth.uid());
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-CREATE FUNCTION public.get_my_master_agent_id()
-RETURNS uuid AS $$
-BEGIN
-  RETURN (SELECT master_agent_id FROM public.profiles WHERE id = auth.uid());
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-
--- 5. RLS (ROW LEVEL SECURITY): Secure data access
+-- 4. RLS (ROW LEVEL SECURITY): Secure data access
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fights ENABLE ROW LEVEL SECURITY;
@@ -135,24 +121,21 @@ ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.coin_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
--- Allow public access to read fights and upcoming fights
-CREATE POLICY "Allow public read access to fights" ON public.fights FOR SELECT USING (true);
+-- Allow public access to read upcoming fights
 CREATE POLICY "Allow public read access to upcoming fights" ON public.upcoming_fights FOR SELECT USING (true);
 
--- DEFINITIVE FIX: A new, non-recursive policy for profiles.
--- This single policy handles all roles correctly and avoids infinite recursion.
-CREATE POLICY "Allow hierarchical and self read access" ON public.profiles FOR SELECT
-USING (
-  -- 1. A user can see their own profile
-  id = auth.uid() OR
-  -- 2. A user can see their direct subordinates (e.g., Master Agent sees their Agents)
-  master_agent_id = auth.uid() OR
-  agent_id = auth.uid() OR
-  -- 3. A user can see their direct superiors (e.g., an Agent sees their Master Agent)
-  id = public.get_my_agent_id() OR
-  id = public.get_my_master_agent_id()
-);
+-- Allow public read access to fights, and operator management
+CREATE POLICY "Allow public read access to fights" ON public.fights FOR SELECT USING (true);
+-- FIX: Add policy to allow operators to create, update, and delete fights.
+CREATE POLICY "Allow operators to manage fights" ON public.fights FOR ALL
+USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
+WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
+
+-- FIX: Replace complex, recursive RLS with a simple policy. Data access is now handled by secure RPC functions.
+CREATE POLICY "Allow users to see and update their own profile" ON public.profiles
+FOR ALL USING (id = auth.uid())
+WITH CHECK (id = auth.uid());
 
 -- Bets policies
 CREATE POLICY "Allow players to see their own bets" ON public.bets FOR SELECT USING (user_id = auth.uid());
@@ -168,25 +151,20 @@ CREATE POLICY "Allow users to see their own data" ON public.transactions FOR SEL
 CREATE POLICY "Allow users to see their own data" ON public.coin_requests FOR SELECT USING (from_user_id = auth.uid() OR to_user_id = auth.uid());
 CREATE POLICY "Allow users to see their own messages" ON public.messages FOR SELECT USING (sender_id = auth.uid() OR receiver_id = auth.uid());
 
--- NOTE: The dangerous recursive operator policy on profiles has been removed.
--- The app correctly uses an RPC call (`get_all_users_for_operator`) for this functionality.
 CREATE POLICY "Allow operator to manage upcoming fights" ON public.upcoming_fights FOR ALL
 USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR')
 WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
 
 
--- 6. TRIGGERS: Automate profile creation
--- This version is robust and handles user creation from the Supabase dashboard.
+-- 5. TRIGGERS: Automate profile creation
 CREATE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.profiles (id, name, email, role, agent_id, master_agent_id)
   VALUES (
     NEW.id,
-    -- Provide a default for name if not in metadata
     COALESCE(NEW.raw_user_meta_data->>'name', NEW.email, 'New User'),
     NEW.email,
-    -- Default role to PLAYER if not specified
     COALESCE((NEW.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'),
     (NEW.raw_user_meta_data->>'agent_id')::uuid,
     (NEW.raw_user_meta_data->>'master_agent_id')::uuid
@@ -206,29 +184,25 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
 
--- 7. RPC FUNCTIONS: Define business logic
+-- 6. RPC FUNCTIONS: Define business logic
 -- Operator Functions
 CREATE FUNCTION public.start_next_fight()
 RETURNS void AS $$
 DECLARE
   next_fight public.upcoming_fights;
 BEGIN
-  -- Check if user is an operator
   IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
     RAISE EXCEPTION 'Only operators can start fights.';
   END IF;
   
-  -- Get the next fight from the queue
   SELECT * INTO next_fight FROM public.upcoming_fights ORDER BY id ASC LIMIT 1;
   
   IF next_fight IS NULL THEN
     RAISE EXCEPTION 'No upcoming fights in the queue.';
   END IF;
   
-  -- Create a new fight
   INSERT INTO public.fights (status) VALUES ('BETTING_OPEN');
   
-  -- Remove it from the queue
   DELETE FROM public.upcoming_fights WHERE id = next_fight.id;
 END;
 $$ LANGUAGE plpgsql;
@@ -236,7 +210,6 @@ $$ LANGUAGE plpgsql;
 CREATE FUNCTION public.close_betting(p_fight_id integer)
 RETURNS void AS $$
 BEGIN
-  -- Check if user is an operator
   IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
     RAISE EXCEPTION 'Only operators can close betting.';
   END IF;
@@ -245,6 +218,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- FIX: Re-engineered the entire function to use a house rake for a sustainable economy.
 CREATE FUNCTION public.declare_winner(p_fight_id integer, p_winner public.fight_winner)
 RETURNS void AS $$
 DECLARE
@@ -255,21 +229,27 @@ DECLARE
   player_profit numeric;
   agent_commission numeric;
   master_commission numeric;
-  total_commission numeric := 0;
+  total_commission_paid numeric := 0;
   agent_profile public.profiles;
   master_agent_profile public.profiles;
   operator_id uuid;
+  house_rake_rate numeric := 0.10; -- 10% house rake
+  house_take numeric;
+  distributable_pool numeric;
 BEGIN
-  -- Check if user is an operator
   operator_id := auth.uid();
   IF (SELECT role FROM public.profiles WHERE id = operator_id) != 'OPERATOR' THEN
     RAISE EXCEPTION 'Only operators can declare winners.';
   END IF;
+
+  -- Ensure the fight is in the correct state
+  IF (SELECT status FROM public.fights WHERE id = p_fight_id) != 'BETTING_CLOSED' THEN
+    RAISE EXCEPTION 'Fight is not ready to be settled.';
+  END IF;
   
-  -- Update fight status
   UPDATE public.fights SET winner = p_winner, status = 'SETTLED' WHERE id = p_fight_id;
   
-  -- If DRAW or CANCELLED, refund all bets
+  -- Handle DRAW or CANCELLED fights by refunding all bets
   IF p_winner = 'DRAW' OR p_winner = 'CANCELLED' THEN
     FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id LOOP
       UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount WHERE id = winning_bet.user_id;
@@ -278,51 +258,70 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Calculate payout ratio for winning bets
+  -- Calculate pools and house rake for winning scenarios
   SELECT SUM(amount) INTO total_pool FROM public.bets WHERE fight_id = p_fight_id;
-  SELECT SUM(amount) INTO winning_pool FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice;
   
-  IF winning_pool IS NULL OR winning_pool = 0 THEN
-    RETURN; -- No winning bets, nothing to pay out
+  -- If no one bet, there's nothing to do
+  IF total_pool IS NULL OR total_pool = 0 THEN
+    RETURN; 
   END IF;
   
-  payout_ratio := total_pool / winning_pool;
+  house_take := total_pool * house_rake_rate;
+  distributable_pool := total_pool - house_take;
+  
+  SELECT SUM(amount) INTO winning_pool FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice;
+  
+  -- If there were bets but no one chose the winner, the house takes the entire pool
+  IF winning_pool IS NULL OR winning_pool = 0 THEN
+    UPDATE public.profiles SET coin_balance = coin_balance + total_pool WHERE id = operator_id;
+    INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, operator_id, total_pool, 'COMMISSION'); -- Using 'COMMISSION' for house profit
+    UPDATE public.fights SET commission = total_pool WHERE id = p_fight_id;
+    RETURN; 
+  END IF;
+  
+  -- Calculate payouts for winners
+  payout_ratio := distributable_pool / winning_pool;
 
-  -- Payout winners and calculate commissions
   FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::text::public.bet_choice LOOP
-    -- Payout the winner
     player_profit := (winning_bet.amount * payout_ratio) - winning_bet.amount;
+    
+    -- Ensure profit is not negative due to floating point math
+    IF player_profit < 0 THEN
+      player_profit := 0;
+    END IF;
+
+    -- Pay the winner their original bet + profit
     UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount + player_profit WHERE id = winning_bet.user_id;
     INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (NULL, winning_bet.user_id, winning_bet.amount + player_profit, 'BET_WIN');
     
-    -- Calculate and distribute commission
+    -- Calculate and distribute commissions based on player's profit
     SELECT * INTO agent_profile FROM public.profiles WHERE id = (SELECT agent_id FROM public.profiles WHERE id = winning_bet.user_id);
     IF agent_profile IS NOT NULL THEN
       agent_commission := player_profit * agent_profile.commission_rate;
       UPDATE public.profiles SET commission_balance = commission_balance + agent_commission WHERE id = agent_profile.id;
       INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, agent_profile.id, agent_commission, 'COMMISSION');
-      total_commission := total_commission + agent_commission;
+      total_commission_paid := total_commission_paid + agent_commission;
       
       SELECT * INTO master_agent_profile FROM public.profiles WHERE id = agent_profile.master_agent_id;
       IF master_agent_profile IS NOT NULL THEN
         master_commission := player_profit * master_agent_profile.commission_rate;
         UPDATE public.profiles SET commission_balance = commission_balance + master_commission WHERE id = master_agent_profile.id;
         INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (winning_bet.user_id, master_agent_profile.id, master_commission, 'COMMISSION');
-        total_commission := total_commission + master_commission;
+        total_commission_paid := total_commission_paid + master_commission;
       END IF;
     END IF;
   END LOOP;
   
-  -- Update operator balance and fight commission record
-  UPDATE public.profiles SET coin_balance = coin_balance - total_commission WHERE id = operator_id;
-  UPDATE public.fights SET commission = total_commission WHERE id = p_fight_id;
+  -- The Operator's net profit is the house take minus commissions paid out
+  UPDATE public.profiles SET coin_balance = coin_balance + (house_take - total_commission_paid) WHERE id = operator_id;
+  -- Store the gross house take in the fight record for auditing
+  UPDATE public.fights SET commission = house_take WHERE id = p_fight_id;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION public.add_upcoming_fight(p_red text, p_white text)
 RETURNS void AS $$
 BEGIN
-  -- Check if user is an operator
   IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
     RAISE EXCEPTION 'Only operators can add fights.';
   END IF;
@@ -330,30 +329,26 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-
 -- Player Functions
-CREATE FUNCTION public.place_bet(p_fight_id integer, p_amount numeric, p_choice public.bet_choice)
+-- FIX: Changed p_amount from numeric to integer to resolve ambiguity.
+CREATE FUNCTION public.place_bet(p_fight_id integer, p_amount integer, p_choice public.bet_choice)
 RETURNS text AS $$
 DECLARE
   current_balance numeric;
 BEGIN
-  -- Check if user is a player
   IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'PLAYER' THEN
     RETURN 'Error: Only players can place bets.';
   END IF;
   
-  -- Check if betting is open
   IF (SELECT status FROM public.fights WHERE id = p_fight_id) != 'BETTING_OPEN' THEN
     RETURN 'Error: Betting is currently closed for this fight.';
   END IF;
   
-  -- Check if player has sufficient balance
   SELECT coin_balance INTO current_balance FROM public.profiles WHERE id = auth.uid();
   IF current_balance < p_amount THEN
     RETURN 'Error: Insufficient coin balance.';
   END IF;
   
-  -- Deduct amount and insert bet
   UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = auth.uid();
   INSERT INTO public.bets (user_id, fight_id, amount, choice) VALUES (auth.uid(), p_fight_id, p_amount, p_choice);
   INSERT INTO public.transactions (from_user_id, to_user_id, amount, type) VALUES (auth.uid(), NULL, p_amount, 'BET_PLACE');
@@ -363,7 +358,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Coin Request Functions
-CREATE FUNCTION public.create_coin_request(p_amount numeric)
+-- FIX: Changed p_amount from numeric to integer to resolve ambiguity.
+CREATE FUNCTION public.create_coin_request(p_amount integer)
 RETURNS text AS $$
 DECLARE
   current_user_profile public.profiles;
@@ -371,7 +367,6 @@ DECLARE
 BEGIN
   SELECT * INTO current_user_profile FROM public.profiles WHERE id = auth.uid();
   
-  -- Determine who the request should go to
   IF current_user_profile.role = 'PLAYER' THEN
     target_user_id := current_user_profile.agent_id;
   ELSIF current_user_profile.role = 'AGENT' THEN
@@ -434,7 +429,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE FUNCTION public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount numeric)
+-- FIX: Changed p_amount from numeric to integer to resolve ambiguity.
+CREATE FUNCTION public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount integer)
 RETURNS text AS $$
 DECLARE
   sender_profile public.profiles;
@@ -450,18 +446,14 @@ BEGIN
 
     fee_amount := p_amount * sender_profile.transfer_fee;
     
-    -- Determine who gets the commission
     IF sender_profile.role = 'AGENT' THEN
         fee_recipient_id := sender_profile.master_agent_id;
     ELSIF sender_profile.role = 'MASTER_AGENT' THEN
-        -- Master Agents sending to Agents don't have fees in this logic, but could be added.
         fee_recipient_id := NULL; 
     ELSE
-        -- No fees for other roles
         fee_recipient_id := NULL;
     END IF;
     
-    -- Perform transfers
     UPDATE public.profiles SET coin_balance = coin_balance - p_amount WHERE id = auth.uid();
     UPDATE public.profiles SET coin_balance = coin_balance + (p_amount - fee_amount) WHERE id = p_receiver_id;
     
@@ -500,8 +492,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- A new secure function for operators to fetch all user data.
--- This prevents the recursive RLS issue for other user roles.
 CREATE FUNCTION public.get_all_users_for_operator()
 RETURNS TABLE(id uuid, name text, email text, role public.user_role, coin_balance numeric, commission_balance numeric, commission_rate numeric, transfer_fee numeric, agent_id uuid, master_agent_id uuid) 
 LANGUAGE plpgsql 
@@ -517,25 +507,35 @@ BEGIN
 END;
 $$;
 
-
--- User Creation Functions
-CREATE OR REPLACE FUNCTION public.create_master_agent(p_name text, p_email text, p_password text)
-RETURNS text 
-LANGUAGE plpgsql 
-SECURITY DEFINER 
+-- FIX: New function to securely get all profiles a user is allowed to see.
+CREATE FUNCTION public.get_user_view_data()
+RETURNS SETOF public.profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  new_user_id uuid;
+  v_agent_id uuid;
+  v_master_agent_id uuid;
 BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-    RETURN 'Error: Only Operators can create Master Agents.';
-  END IF;
-  SELECT auth.admin.create_user(p_email, p_password, jsonb_build_object('name', p_name, 'role', 'MASTER_AGENT')) INTO new_user_id;
-  RETURN 'Master Agent ' || p_name || ' created successfully.';
+  -- Get the current user's agent and master agent IDs
+  SELECT agent_id, master_agent_id INTO v_agent_id, v_master_agent_id
+  FROM public.profiles WHERE id = auth.uid();
+
+  -- Return all profiles this user is allowed to see
+  RETURN QUERY
+  SELECT * FROM public.profiles p
+  WHERE
+    -- The user themselves
+    p.id = auth.uid() OR
+    -- Their subordinates (their players or agents)
+    p.agent_id = auth.uid() OR
+    p.master_agent_id = auth.uid() OR
+    -- Their direct superiors (their agent or master agent)
+    p.id = v_agent_id OR
+    p.id = v_master_agent_id;
 END;
 $$;
-
 
 -- Function for registration form
 CREATE OR REPLACE FUNCTION public.get_registerable_agents()
@@ -549,5 +549,4 @@ BEGIN
   SELECT p.id, p.name FROM public.profiles p WHERE p.role = 'AGENT';
 END;
 $$;
--- Grant execute permission to the anon role so they can see agents on signup
 GRANT EXECUTE ON FUNCTION public.get_registerable_agents() TO anon;
