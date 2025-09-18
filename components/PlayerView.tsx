@@ -1,12 +1,18 @@
+
 import React, { useState } from 'react';
-import { Player, FightStatus, PlayerFightHistoryEntry, UpcomingFight, Bet, FightWinner, AllUserTypes, Message } from '../types';
+import {
+  Player, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry,
+  BetChoice, UpcomingFight, AllUserTypes, Message, Agent
+} from '../types';
 import LiveFeed from './LiveFeed';
-import BettingControls from './BettingControls';
 import BettingPools from './BettingPools';
+import BettingControls from './BettingControls';
 import FightHistory from './FightHistory';
 import Trends from './Trends';
+import Card from './common/Card';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer';
 import RequestCoinsModal from './RequestCoinsModal';
+import RequestCoinsToAgentModal from './RequestCoinsToAgentModal';
 import ChatModal from './ChatModal';
 
 interface PlayerViewProps {
@@ -17,13 +23,14 @@ interface PlayerViewProps {
   timer: number;
   pools: { meron: number; wala: number };
   fightHistory: PlayerFightHistoryEntry[];
-  onPlaceBet: (amount: number, choice: 'RED' | 'WHITE') => Promise<string | null>;
+  onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
   currentBet: Bet | null;
   isDrawerOpen: boolean;
   onCloseDrawer: () => void;
   upcomingFights: UpcomingFight[];
   onCreateCoinRequest: (amount: number, targetUserId?: string) => Promise<string | null>;
   allUsers: { [id: string]: AllUserTypes };
+  agents: Agent[];
   onOpenChat: (user: AllUserTypes) => void;
   chatTargetUser: AllUserTypes | null;
   onCloseChat: () => void;
@@ -31,87 +38,128 @@ interface PlayerViewProps {
   messages: { [userId: string]: Message[] };
 }
 
-const PlayerView: React.FC<PlayerViewProps> = ({
-  currentUser,
-  fightStatus,
-  lastWinner,
-  fightId,
-  timer,
-  pools,
-  fightHistory,
-  onPlaceBet,
-  currentBet,
-  isDrawerOpen,
-  onCloseDrawer,
-  upcomingFights,
-  onCreateCoinRequest,
-  allUsers,
-  onOpenChat,
-  chatTargetUser,
-  onCloseChat,
-  onSendMessage,
-  messages
-}) => {
-    const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
-    const agent = allUsers[currentUser.agentId];
+const PlayerView: React.FC<PlayerViewProps> = (props) => {
+  const {
+    currentUser, fightStatus, lastWinner, fightId, timer, pools,
+    fightHistory, onPlaceBet, currentBet, isDrawerOpen, onCloseDrawer,
+    upcomingFights, onCreateCoinRequest, allUsers, agents, onOpenChat,
+    chatTargetUser, onCloseChat, onSendMessage, messages
+  } = props;
+  
+  const [isRequestModalOpen, setRequestModalOpen] = useState(false);
+  const [isRequestToAgentModalOpen, setRequestToAgentModalOpen] = useState(false);
+  
+  const hasAgent = !!currentUser.agentId;
+  const agent = hasAgent ? allUsers[currentUser.agentId] : null;
 
-    const handleSendMessage = async (text: string, amount: number) => {
-        if (chatTargetUser) {
-            await onSendMessage(chatTargetUser.id, text, amount);
-        }
-    };
+  const handleSendMessage = async (text: string, amount: number) => {
+    if (chatTargetUser) {
+        await onSendMessage(chatTargetUser.id, text, amount);
+    }
+  };
+  
+  const renderActionPanel = () => {
+    if (hasAgent && agent) {
+      return (
+        <Card>
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => setRequestModalOpen(true)}
+              className="w-full p-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition"
+            >
+              Request Coins from Agent
+            </button>
+            <button
+              onClick={() => onOpenChat(agent)}
+              className="w-full p-2 bg-zinc-600 hover:bg-zinc-700 text-white font-bold rounded-lg transition"
+            >
+              Chat with {agent.name}
+            </button>
+          </div>
+        </Card>
+      );
+    }
+    
+    return (
+      <Card>
+        <div className="p-4 text-center">
+            <h3 className="text-lg font-semibold text-gray-200">Get Started</h3>
+            <p className="text-sm text-gray-400 my-2">You need an agent to get coins. Send a request to any agent to begin.</p>
+            <button
+                onClick={() => setRequestToAgentModalOpen(true)}
+                className="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition"
+            >
+                Request Coins
+            </button>
+        </div>
+      </Card>
+    );
+  };
 
   return (
     <>
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <LiveFeed fightStatus={fightStatus} lastWinner={lastWinner} fightId={fightId} timer={timer} />
-          <BettingControls
-            status={fightStatus}
-            balance={currentUser.coinBalance}
+          <LiveFeed
+            fightStatus={fightStatus}
+            lastWinner={lastWinner}
+            fightId={fightId}
             timer={timer}
-            onPlaceBet={onPlaceBet}
-            currentBet={currentBet}
           />
-        </div>
-        <div className="space-y-4">
           <BettingPools pools={pools} />
-          <div className="grid grid-cols-2 gap-2">
-            <button
-                onClick={() => setIsRequestModalOpen(true)}
-                className="w-full p-3 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition duration-300"
-            >
-                Request Coins
-            </button>
-            {agent && (
-                <button
-                    onClick={() => onOpenChat(agent)}
-                    className="w-full p-3 bg-zinc-600 hover:bg-zinc-700 text-white font-bold text-sm rounded-lg transition duration-300"
-                >
-                    Chat with Agent
-                </button>
-            )}
-           </div>
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <div className="p-4">
+              <h3 className="text-lg font-semibold text-gray-200">Betting</h3>
+              <p className="text-sm text-gray-400 mb-4">
+                Place your bet on RED or WHITE. Betting closes when the timer ends.
+              </p>
+              <BettingControls
+                status={fightStatus}
+                balance={currentUser.coinBalance}
+                timer={timer}
+                onPlaceBet={onPlaceBet}
+                currentBet={currentBet}
+              />
+            </div>
+          </Card>
+
+          {renderActionPanel()}
+          
           <Trends fightHistory={fightHistory} />
+          
           <FightHistory fightHistory={fightHistory} />
         </div>
       </div>
+      
       <UpcomingFightsDrawer
         isOpen={isDrawerOpen}
         onClose={onCloseDrawer}
         fights={upcomingFights}
       />
-       {isRequestModalOpen && (
+      
+      {isRequestModalOpen && hasAgent && (
         <RequestCoinsModal
-            onClose={() => setIsRequestModalOpen(false)}
-            onSubmit={onCreateCoinRequest}
+            onClose={() => setRequestModalOpen(false)}
+            onSubmit={(amount) => onCreateCoinRequest(amount)}
         />
       )}
-      {chatTargetUser && agent && chatTargetUser.id === agent.id && (
+      
+      {isRequestToAgentModalOpen && !hasAgent && (
+        <RequestCoinsToAgentModal
+          onClose={() => setRequestToAgentModalOpen(false)}
+          onSubmit={onCreateCoinRequest}
+          agents={agents}
+        />
+      )}
+
+      {chatTargetUser && (
         <ChatModal
           currentUser={currentUser}
-          chatTargetUser={agent}
-          messages={messages[agent.id] || []}
+          chatTargetUser={chatTargetUser}
+          messages={messages[chatTargetUser.id] || []}
           onClose={onCloseChat}
           onSendMessage={handleSendMessage}
         />

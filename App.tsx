@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
@@ -42,7 +43,6 @@ const App: React.FC = () => {
     const [notification, setNotification] = useState<NotificationType | null>(null);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [registerableAgents, setRegisterableAgents] = useState<{id: string, name: string}[]>([]);
     const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
     const [isMasquerading, setIsMasquerading] = useState(false);
     
@@ -78,7 +78,6 @@ const App: React.FC = () => {
     const refreshAllData = useCallback(async () => {
         if (!supabase || !currentUser) return;
         
-        // Fetch all users/profiles
         let profilesData;
         let profilesError;
         
@@ -87,7 +86,6 @@ const App: React.FC = () => {
             profilesData = data;
             profilesError = error;
         } else {
-            // FIX: Call the new, secure RPC function instead of a direct table query to avoid RLS issues.
             const { data, error } = await supabase.rpc('get_user_view_data');
             profilesData = data;
             profilesError = error;
@@ -100,13 +98,11 @@ const App: React.FC = () => {
                 return acc;
             }, {} as { [id: string]: AllUserTypes });
             setAllUsers(usersMap);
-            // Also refresh current user's data from the new map
              if (usersMap[currentUser.id]) {
                 setCurrentUser(usersMap[currentUser.id]);
             }
         }
         
-        // Fetch current fight state
         const { data: currentFight, error: currentFightError } = await supabase
             .from('fights')
             .select('*')
@@ -114,14 +110,13 @@ const App: React.FC = () => {
             .limit(1)
             .single();
         
-        if (currentFightError && currentFightError.code !== 'PGRST116') { // Ignore "Row not found" error
+        if (currentFightError && currentFightError.code !== 'PGRST116') {
             console.error('Error fetching current fight state:', currentFightError);
         } else if (currentFight) {
             setFightId(currentFight.id);
             setFightStatus(currentFight.status);
             setLastWinner(currentFight.winner);
 
-            // Fetch bets for the current fight
             const { data: betsData, error: betsError } = await supabase.from('bets').select('*').eq('fight_id', currentFight.id);
             if (betsError) console.error('Error fetching bets:', betsError);
             else {
@@ -137,17 +132,14 @@ const App: React.FC = () => {
              setFightId(null);
         }
 
-        // Fetch fight history
         const { data: historyData, error: historyError } = await supabase.from('fights').select('*').order('created_at', { ascending: false }).limit(50);
         if (historyError) console.error('Error fetching fight history:', historyError);
         else setFightHistory(historyData);
 
-        // Fetch upcoming fights
         const { data: upcomingData, error: upcomingError } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
         if (upcomingError) console.error('Error fetching upcoming fights:', upcomingError);
         else setUpcomingFights(upcomingData.map(uf => ({ ...uf, participants: uf.participants as any })));
 
-        // Fetch user-specific data
         const { data: txs, error: txsError } = await supabase.rpc('get_transactions_for_user');
         if(txsError) console.error("Error fetching transactions:", txsError);
         else setTransactions(txs);
@@ -161,8 +153,7 @@ const App: React.FC = () => {
             if(betsError) console.error("Error fetching player bets:", betsError)
             else setPlayerBets(allMyBets);
         }
-
-        // FIX: Also refresh messages for the currently open chat window to ensure real-time updates.
+        
         const currentChatTarget = chatTargetUserRef.current;
         if (currentChatTarget) {
             const { data, error } = await supabase.rpc('get_messages', { p_other_user_id: currentChatTarget.id });
@@ -174,23 +165,7 @@ const App: React.FC = () => {
         }
 
     }, [currentUser, supabase]);
-
-    useEffect(() => {
-        const fetchAgentsForRegistration = async () => {
-            if (!isSupabaseConfigured || !supabase) return;
-            // Fetch agents from the new secure RPC function
-            const { data, error } = await supabase.rpc('get_registerable_agents');
-
-            if (error) {
-                console.error("Error fetching agents for registration:", error.message || error);
-            } else if (data) {
-                setRegisterableAgents(data);
-            }
-        };
-        fetchAgentsForRegistration();
-    }, []);
-
-    // Effect for handling authentication state changes
+    
     useEffect(() => {
         if (!isSupabaseConfigured || !supabase) {
             setIsLoading(false);
@@ -207,8 +182,6 @@ const App: React.FC = () => {
 
                 if (error || !profile) {
                     console.error("Login failed: Could not find a user profile.", error);
-                    // SILENTLY LOG OUT: Do not show an error toast if profile is missing, just sign out.
-                    // showNotification("Login failed: Your user profile could not be loaded.", 'error');
                     await supabase.auth.signOut();
                     setCurrentUser(null);
                 } else {
@@ -217,7 +190,7 @@ const App: React.FC = () => {
             } else {
                 setCurrentUser(null);
                 setAllUsers({});
-                setIsMasquerading(false); // Reset masquerade on logout
+                setIsMasquerading(false);
             }
             setIsLoading(false);
         };
@@ -272,13 +245,30 @@ const App: React.FC = () => {
         return null;
     };
     
-    const handleRegister = async (name: string, email: string, password: string, agentId: string | null): Promise<string | null> => {
-        if (!isSupabaseConfigured) return "Supabase is not configured.";
-        const { error } = await supabase.auth.signUp({
-            email, password,
-            options: { data: { name, agent_id: agentId, role: UserRole.PLAYER } }
+    const handleRegister = async (name: string, email: string, password: string): Promise<string | null> => {
+        if (!isSupabaseConfigured || !supabase) return "Supabase is not configured.";
+        
+        // Step 1: Sign up the user in auth.users. The session is automatically created.
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email, password
         });
-        if (error) return error.message;
+
+        if (signUpError) return signUpError.message;
+        if (!signUpData.user) return "Registration failed: user not created.";
+
+        // Step 2: The user is now authenticated. Call the RPC function to create their profile.
+        const { error: rpcError } = await supabase.rpc('create_user_profile', {
+            p_name: name,
+            p_email: email
+        });
+
+        if (rpcError) {
+            console.error("Critical Error: Failed to create user profile after signup.", rpcError);
+            // Sign the user out to prevent them being in a broken state.
+            await supabase.auth.signOut();
+            return `Registration succeeded, but failed to create your user profile. Please contact support. Error: ${rpcError.message}`;
+        }
+
         showNotification('Registration successful! Check your email for verification.', 'success');
         return null;
     };
@@ -287,15 +277,9 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured || !supabase) return;
         setIsLoading(true);
         const { error } = await supabase.auth.signOut();
-        if (error) {
-            // Gracefully handle cases where the session is already missing
-            if (error.message !== 'Auth session missing!') {
-                showNotification(`Error logging out: ${error.message}`, 'error');
-            }
+        if (error && error.message !== 'Auth session missing!') {
+            showNotification(`Error logging out: ${error.message}`, 'error');
         }
-        // On successful signout, or if the session was already missing, the onAuthStateChange listener 
-        // will handle resetting all state and setting isLoading to false.
-        // Explicitly clear sensitive state as a fallback.
         setCurrentUser(null);
         setAllUsers({});
         setIsMasquerading(false);
@@ -333,7 +317,6 @@ const App: React.FC = () => {
 
     const onDeclareWinner = async (winner: FightWinner) => {
         if (!supabase || fightId === null) return;
-        // FIX: Pass the winner as plain text to avoid enum casting issues in Postgres.
         const { error } = await supabase.rpc('declare_winner', { p_fight_id: fightId, p_winner_text: winner });
         if(error) handleRpcError(error, "Failed to declare winner.");
         else showNotification(`Fight #${fightId} settled. Winner: ${winner}`, 'success');
@@ -394,7 +377,6 @@ const App: React.FC = () => {
         const { data, error } = await supabase.rpc('send_message_and_coins', {p_receiver_id: receiverId, p_text: text, p_amount: amount });
         if(error) handleRpcError(error, "Failed to send message/coins.");
         if(data) showNotification(data, 'error');
-        // No need to manually refresh, realtime will handle it
     };
     
     const onChangePassword = async (oldPassword: string, newPassword: string): Promise<string | null> => {
@@ -424,6 +406,7 @@ const App: React.FC = () => {
                     }
                     return {...fh, bet, outcome};
                 });
+                 const agentsForPlayer = Object.values(allUsers).filter(u => u.role === UserRole.AGENT) as Agent[];
                 return (
                     <PlayerView
                         currentUser={currentUser as Player}
@@ -440,6 +423,7 @@ const App: React.FC = () => {
                         upcomingFights={upcomingFights}
                         onCreateCoinRequest={onCreateCoinRequest}
                         allUsers={allUsers}
+                        agents={agentsForPlayer}
                         onOpenChat={handleOpenChat}
                         chatTargetUser={chatTargetUser}
                         onCloseChat={() => setChatTargetUser(null)}
@@ -500,9 +484,7 @@ const App: React.FC = () => {
     }
     
     if (!currentUser) {
-        return <AuthView onLogin={handleLogin} onRegister={handleRegister} isSupabaseConfigured={isSupabaseConfigured}
-            agents={registerableAgents}
-        />;
+        return <AuthView onLogin={handleLogin} onRegister={handleRegister} isSupabaseConfigured={isSupabaseConfigured} />;
     }
 
     return (
