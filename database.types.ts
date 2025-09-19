@@ -204,7 +204,7 @@ export interface Database {
           p_red_text: string
           p_white_text: string
         }
-        Returns: number
+        Returns: Database["public"]["Tables"]["upcoming_fights"]["Row"][]
       },
       close_betting: {
         Args: {
