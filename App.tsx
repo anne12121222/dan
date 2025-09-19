@@ -272,65 +272,38 @@ const App: React.FC = () => {
     }, [currentUser, supabase]);
 
 
-  // Effect for fetching all user-dependent data and subscribing to channels
+  // DEFINITIVE REAL-TIME FIX: Consolidate all subscriptions into a single, robust useEffect hook.
+  // This prevents race conditions and ensures all real-time updates are handled reliably.
   useEffect(() => {
-    if (!currentUser) return;
-    fetchAllData();
+    if (!supabase || !currentUser) return;
 
-    // REAL-TIME FIX: Use a single, robust channel for all user-related data.
-    const userChannel = supabase.channel(`user-data-${currentUser.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'coin_requests',
-        filter: `to_user_id=eq.${currentUser.id}` // Only listen for requests sent TO me
-      }, payload => {
-        // ROBUSTNESS FIX: Refetch all data to ensure consistency.
-        fetchAllData();
+    // Initial data fetch on login
+    fetchAllData();
+    fetchActiveFight();
+
+    // A single channel for all real-time subscriptions
+    const mainChannel = supabase.channel(`app-channel-${currentUser.id}`)
+      // User-specific listeners for coin requests, transactions, and profile updates
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'coin_requests', filter: `to_user_id=eq.${currentUser.id}` }, payload => {
+        fetchAllData(); // Refetch all data to get the new request and sender info
         setNotification({ message: 'You have a new coin request!', type: 'success' });
       })
-      .on('postgres_changes', {
-        event: 'UPDATE', // An update means a response or adoption
-        schema: 'public',
-        table: 'coin_requests',
-      }, fetchAllData) // Refetch all data for consistency after an update
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'transactions',
-      }, fetchAllData) // New transaction, refetch to update balances and history
-      .on('postgres_changes', {
-         event: 'UPDATE',
-         schema: 'public',
-         table: 'profiles',
-         filter: `id=eq.${currentUser.id}`
-      }, payload => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'coin_requests' }, fetchAllData) // For updates (approve/decline)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, fetchAllData) // To update balances
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}` }, payload => {
          const updatedUser = mapProfileToUser(payload.new as ProfileRow);
          if (updatedUser) setCurrentUser(updatedUser);
       })
+      // Public listeners for fights, bets, and the upcoming queue
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchActiveFight)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bets' }, fetchActiveFight)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, fetchActiveFight)
       .subscribe();
 
     return () => {
-        supabase.removeChannel(userChannel);
+        supabase.removeChannel(mainChannel);
     };
-  }, [currentUser, fetchAllData]);
-
-  // Effect for fetching fight data and subscribing
-  useEffect(() => {
-    if (!supabase) return;
-    
-    fetchActiveFight();
-    
-    const fightChannel = supabase.channel('public-fights').on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchActiveFight).subscribe();
-    const betsChannel = supabase.channel('public-bets').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bets' }, fetchActiveFight).subscribe();
-    const upcomingChannel = supabase.channel('public-upcoming-fights').on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, fetchActiveFight).subscribe();
-
-    return () => {
-        supabase.removeChannel(fightChannel);
-        supabase.removeChannel(betsChannel);
-        supabase.removeChannel(upcomingChannel);
-    };
-  }, [currentUser, fetchActiveFight]);
+  }, [currentUser, supabase, fetchAllData, fetchActiveFight]);
 
   // Effect for client-side timer
   useEffect(() => {
@@ -490,8 +463,8 @@ const App: React.FC = () => {
     setLoading(false);
     if (error) { return error.message; }
     
-    // ROBUSTNESS FIX: Call the main fetch function to guarantee the UI updates instantly.
-    fetchActiveFight();
+    // UI update is now handled reliably by the real-time subscription.
+    // No manual refetch is needed.
 
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;
