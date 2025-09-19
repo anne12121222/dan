@@ -1,8 +1,10 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
-import { AllUserTypes, UserRole, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry, UpcomingFight, Agent, FightResult, MasterAgent, Operator, Player } from './types.ts';
+import { AllUserTypes, UserRole, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry, UpcomingFight, Agent, FightResult, MasterAgent, Operator, Player, Transaction, CoinRequest } from './types.ts';
+import { Database } from './database.types.ts';
 
 import AuthView from './components/AuthView.tsx';
 import PlayerView from './components/PlayerView.tsx';
@@ -13,33 +15,43 @@ import Header from './components/Header.tsx';
 import NotificationComponent from './components/Notification.tsx';
 import ChangePasswordModal from './components/ChangePasswordModal.tsx';
 
-// A mock API for fight state, in a real app this would come from Supabase
-const useMockFightState = () => {
-    const [fightState, setFightState] = useState({
-        fightId: 1,
-        status: FightStatus.BETTING_OPEN,
-        timer: 30,
-        lastWinner: null as FightWinner | null,
-        pools: { meron: 15000, wala: 12000 }
-    });
+// FIX: Add type aliases for Supabase table rows to fix type inference issues.
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
+type CoinRequestRow = Database["public"]["Tables"]["coin_requests"]["Row"];
+type UpcomingFightRow = Database["public"]["Tables"]["upcoming_fights"]["Row"];
+type FightRow = Database["public"]["Tables"]["fights"]["Row"];
+type BetRow = Database["public"]["Tables"]["bets"]["Row"];
 
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setFightState(s => {
-                if (s.status === FightStatus.BETTING_OPEN) {
-                    if (s.timer > 0) {
-                        return { ...s, timer: s.timer - 1 };
-                    } else {
-                        return { ...s, status: FightStatus.BETTING_CLOSED, timer: 0 };
-                    }
-                }
-                return s;
-            });
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
 
-    return fightState;
+// Helper function to map Supabase profile to frontend user type
+const mapProfileToUser = (profile: Database['public']['Tables']['profiles']['Row']): AllUserTypes | null => {
+    const {
+        id, name, email, role, coin_balance, commission_balance,
+        commission_rate, transfer_fee, agent_id, master_agent_id
+    } = profile;
+
+    const baseUser = { id, name, email, coinBalance: coin_balance };
+
+    switch (role) {
+        case UserRole.PLAYER:
+            return { ...baseUser, role: UserRole.PLAYER, agentId: agent_id };
+        case UserRole.AGENT:
+            return {
+                ...baseUser, role: UserRole.AGENT, masterAgentId: master_agent_id,
+                commissionBalance: commission_balance, commissionRate: commission_rate,
+                transferFee: transfer_fee,
+            };
+        case UserRole.MASTER_AGENT:
+            return {
+                ...baseUser, role: UserRole.MASTER_AGENT, commissionBalance: commission_balance,
+                commissionRate: commission_rate, transferFee: transfer_fee,
+            };
+        case UserRole.OPERATOR:
+            return { ...baseUser, role: UserRole.OPERATOR };
+        default:
+            return null;
+    }
 };
 
 
@@ -51,58 +63,53 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  // --- MOCK DATA ---
-  const fightState = useMockFightState(); // using mock hook
+  // --- LIVE DATA STATES (replaces mocks) ---
+  const [agents, setAgents] = useState<Agent[]>([]); // For registration form
+  const [myAgents, setMyAgents] = useState<Agent[]>([]);
+  const [myPlayers, setMyPlayers] = useState<Player[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [coinRequests, setCoinRequests] = useState<CoinRequest[]>([]);
+  const [allUsers, setAllUsers] = useState<{ [id: string]: AllUserTypes }>({});
+  
+  // Fight states
+  const [activeFight, setActiveFight] = useState<Database['public']['Tables']['fights']['Row'] | null>(null);
+  const [lastWinner, setLastWinner] = useState<FightWinner | null>(null);
+  const [timer, setTimer] = useState(0);
+  const [bettingPools, setBettingPools] = useState({ meron: 0, wala: 0 });
   const [currentBet, setCurrentBet] = useState<Bet | null>(null);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const MOCK_HISTORY: PlayerFightHistoryEntry[] = [
-      { id: 0, winner: 'RED', commission: 0, bet: { id: 'b1', userId: '101', fightId: 0, amount: 100, choice: 'RED' }, outcome: 'WIN' }
-  ];
-  const MOCK_UPCOMING: UpcomingFight[] = [
-      { id: 2, participants: { red: 'Fighter A', white: 'Fighter B' } }
-  ];
-  const MOCK_COMPLETED: FightResult[] = [
-    { id: 0, winner: 'RED', commission: 1350 }
-  ];
-  // --- END MOCK DATA ---
+  const [liveBets, setLiveBets] = useState<Bet[]>([]);
+  const [upcomingFights, setUpcomingFights] = useState<UpcomingFight[]>([]);
+  const [completedFights, setCompletedFights] = useState<FightResult[]>([]);
+  const [fightHistory, setFightHistory] = useState<PlayerFightHistoryEntry[]>([]);
 
+  // Effect for Auth
   useEffect(() => {
     // Fetch agents for registration form
-    const fetchAgents = async () => {
+    const fetchAgentsForRegistration = async () => {
         if (!supabase) return;
-        const { data, error } = await supabase.from('profiles').select('*').eq('role', UserRole.AGENT);
-        if (data) setAgents(data as unknown as Agent[]);
+        const { data } = await supabase.from('profiles').select('*').eq('role', UserRole.AGENT);
+        if (data) setAgents(data.map(p => mapProfileToUser(p as ProfileRow)).filter(p => p) as Agent[]);
     };
-    fetchAgents();
+    fetchAgentsForRegistration();
 
-    // Handle auth state
-    supabase?.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    }) ?? { data: { subscription: null } };
-
-    return () => {
-      authListener?.subscription?.unsubscribe();
-    };
+    supabase?.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => setSession(session)) ?? { data: { subscription: null } };
+    return () => authListener?.subscription?.unsubscribe();
   }, []);
 
+  // Effect to fetch user profile when session changes
    useEffect(() => {
     const fetchUserProfile = async (user: User) => {
       if (!supabase) return;
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       
       if (error) {
         console.error("Error fetching profile:", error);
         handleLogout();
       } else if (profile) {
-        setCurrentUser(profile as AllUserTypes);
+        // CRITICAL FIX: Map snake_case from DB to camelCase for frontend.
+        const userProfile = mapProfileToUser(profile);
+        setCurrentUser(userProfile);
       }
       setLoading(false);
     };
@@ -116,6 +123,191 @@ const App: React.FC = () => {
     }
   }, [session]);
 
+  // Effect for fetching all user-dependent data and subscribing to channels
+  useEffect(() => {
+    if (!supabase || !currentUser) return;
+
+    const fetchAllData = async () => {
+        const userIdsToFetch = new Set<string>([currentUser.id]);
+        
+        // Fetch common data: transactions and coin requests
+        const txPromise = supabase.from('transactions').select('*').or(`from_user_id.eq.${currentUser.id},to_user_id.eq.${currentUser.id}`).order('transaction_timestamp', { ascending: false });
+        const crPromise = supabase.from('coin_requests').select('*').or(`to_user_id.eq.${currentUser.id},from_user_id.eq.${currentUser.id}`).order('created_at', { ascending: false });
+        
+        const [txRes, crRes] = await Promise.all([txPromise, crPromise]);
+
+        if (txRes.data) {
+            // FIX: Cast Supabase response data to the correct type.
+            const transactions = txRes.data as TransactionRow[];
+            transactions.forEach(tx => {
+                if (tx.from_user_id) userIdsToFetch.add(tx.from_user_id);
+                if (tx.to_user_id) userIdsToFetch.add(tx.to_user_id);
+            });
+            setTransactions(transactions.map(tx => ({ id: tx.id, type: tx.type, fromUserId: tx.from_user_id, toUserId: tx.to_user_id, amount: tx.amount, transactionTimestamp: tx.transaction_timestamp })));
+        }
+        if (crRes.data) {
+            // FIX: Cast Supabase response data to the correct type.
+            const coinRequestsData = crRes.data as CoinRequestRow[];
+            coinRequestsData.forEach(req => { userIdsToFetch.add(req.from_user_id); userIdsToFetch.add(req.to_user_id); });
+            setCoinRequests(coinRequestsData.map(req => ({ id: req.id, fromUserId: req.from_user_id, toUserId: req.to_user_id, amount: req.amount, status: req.status, createdAt: req.created_at })));
+        }
+
+        // Role-specific data
+        if (currentUser.role === UserRole.MASTER_AGENT) {
+            const { data } = await supabase.from('profiles').select('*').eq('master_agent_id', currentUser.id);
+            if (data) {
+                // FIX: Cast Supabase response data to the correct type.
+                const agentProfiles = data as ProfileRow[];
+                agentProfiles.forEach(p => userIdsToFetch.add(p.id));
+                setMyAgents(agentProfiles.map(p => mapProfileToUser(p)) as Agent[]);
+            }
+        }
+        if (currentUser.role === UserRole.AGENT) {
+            const { data } = await supabase.from('profiles').select('*').eq('agent_id', currentUser.id);
+            if (data) {
+                // FIX: Cast Supabase response data to the correct type.
+                 const playerProfiles = data as ProfileRow[];
+                 playerProfiles.forEach(p => userIdsToFetch.add(p.id));
+                 setMyPlayers(playerProfiles.map(p => mapProfileToUser(p)) as Player[]);
+            }
+            if (currentUser.masterAgentId) userIdsToFetch.add(currentUser.masterAgentId);
+        }
+        
+        // Fetch all unique user profiles needed for display
+        const { data: profilesData } = await supabase.from('profiles').select('*').in('id', Array.from(userIdsToFetch));
+        if (profilesData) {
+            // FIX: Cast Supabase response data to the correct type.
+            const profiles = profilesData as ProfileRow[];
+            const userMap: { [id: string]: AllUserTypes } = {};
+            profiles.forEach(p => {
+                const user = mapProfileToUser(p);
+                if (user) userMap[p.id] = user;
+            });
+            setAllUsers(userMap);
+        }
+    };
+
+    fetchAllData();
+
+    // Setup subscriptions
+    const txChannel = supabase.channel(`transactions-${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, fetchAllData).subscribe();
+    const crChannel = supabase.channel(`coin_requests-${currentUser.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'coin_requests' }, fetchAllData).subscribe();
+    const profileChannel = supabase.channel(`profiles-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}`}, payload => {
+        const updatedUser = mapProfileToUser(payload.new as any);
+        if (updatedUser) setCurrentUser(updatedUser);
+    }).subscribe();
+
+    return () => {
+        supabase.removeChannel(txChannel);
+        supabase.removeChannel(crChannel);
+        supabase.removeChannel(profileChannel);
+    };
+  }, [currentUser]);
+
+  // Effect for fetching fight data and subscribing
+  useEffect(() => {
+    if (!supabase) return;
+    
+    const fetchFightData = async (fightId: number | null = null) => {
+        // Fetch upcoming fights
+        const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+        if (upcomingData) {
+            // FIX: Cast Supabase response data to the correct type.
+            const upcoming = upcomingData as UpcomingFightRow[];
+            setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
+        }
+
+        // Fetch completed fights
+        const { data: completedData } = await supabase.from('fights').select('id, winner, commission').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(20);
+        // FIX: Cast Supabase response data to the correct type.
+        const completed = completedData as Pick<FightRow, "id" | "winner" | "commission">[] | null;
+        if (completed) setCompletedFights(completed as FightResult[]);
+
+        if (fightId && currentUser?.role === UserRole.PLAYER) {
+            const { data: historyBetsData } = await supabase.from('bets').select('*').eq('user_id', currentUser.id).in('fight_id', completed?.map(f => f.id) || []);
+            // FIX: Cast Supabase response data to the correct type.
+            const historyBets = historyBetsData as BetRow[] | null;
+            const historyMap = new Map(historyBets?.map(b => [b.fight_id, b]));
+            setFightHistory(completed?.map(f => {
+                const bet = historyMap.get(f.id);
+                let outcome: 'WIN'|'LOSS'|'REFUND'|null = null;
+                if (bet) {
+                    if (f.winner === 'DRAW' || f.winner === 'CANCELLED') outcome = 'REFUND';
+                    else if (f.winner === bet.choice) outcome = 'WIN';
+                    else outcome = 'LOSS';
+                }
+                return { ...f, bet: bet ? { id: bet.id, userId: bet.user_id, fightId: bet.fight_id, amount: bet.amount, choice: bet.choice } : null, outcome };
+            }) || []);
+        }
+    }
+
+    const fetchActiveFight = async () => {
+        const { data: fightData } = await supabase.from('fights').select('*').in('status', ['BETTING_OPEN', 'BETTING_CLOSED']).order('id', { ascending: false }).limit(1).single();
+        // FIX: Cast Supabase response data to the correct type.
+        const fight = fightData as FightRow | null;
+        setActiveFight(fight);
+        setCurrentBet(null); // Reset bet on new fight
+        if (fight) {
+            fetchFightData(fight.id);
+            const { data: betsData } = await supabase.from('bets').select('*').eq('fight_id', fight.id);
+            if (betsData) {
+                // FIX: Cast Supabase response data to the correct type.
+                const bets = betsData as BetRow[];
+                const pools = bets.reduce((acc, b) => {
+                    if (b.choice === 'RED') acc.meron += b.amount;
+                    if (b.choice === 'WHITE') acc.wala += b.amount;
+                    return acc;
+                }, { meron: 0, wala: 0});
+                setBettingPools(pools);
+                setLiveBets(bets.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, amount: b.amount, choice: b.choice })));
+                if (currentUser) {
+                    const userBet = bets.find(b => b.user_id === currentUser.id);
+                    if (userBet) setCurrentBet({ id: userBet.id, userId: userBet.user_id, fightId: userBet.fight_id, amount: userBet.amount, choice: userBet.choice });
+                }
+            }
+        } else {
+            fetchFightData(null);
+            const { data: lastFightData } = await supabase.from('fights').select('winner').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(1).single();
+            // FIX: Cast Supabase response data to the correct type.
+            const lastFight = lastFightData as Pick<FightRow, "winner"> | null;
+            if (lastFight) setLastWinner(lastFight.winner as FightWinner);
+            else setLastWinner(null);
+        }
+    }
+
+    fetchActiveFight();
+    
+    const fightChannel = supabase.channel('public-fights').on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchActiveFight).subscribe();
+    const betsChannel = supabase.channel('public-bets').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bets' }, fetchActiveFight).subscribe();
+    const upcomingChannel = supabase.channel('public-upcoming-fights').on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, fetchActiveFight).subscribe();
+
+    return () => {
+        supabase.removeChannel(fightChannel);
+        supabase.removeChannel(betsChannel);
+        supabase.removeChannel(upcomingChannel);
+    };
+  }, [currentUser]);
+
+  // Effect for client-side timer
+  useEffect(() => {
+    if (activeFight?.status === FightStatus.BETTING_OPEN) {
+        // This is a rough client-side timer. A real app should sync with server time.
+        const start = new Date(activeFight.created_at).getTime();
+        const duration = 30 * 1000; // 30 seconds
+        
+        const updateTimer = () => {
+            const elapsed = Date.now() - start;
+            const remaining = Math.max(0, Math.ceil((duration - elapsed) / 1000));
+            setTimer(remaining);
+        }
+        updateTimer();
+        const interval = setInterval(updateTimer, 1000);
+        return () => clearInterval(interval);
+    } else {
+        setTimer(0);
+    }
+  }, [activeFight]);
+
 
   const handleLogin = async (email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
@@ -127,7 +319,6 @@ const App: React.FC = () => {
     if (!supabase) return "Supabase not configured";
     const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { name, role: UserRole.PLAYER, agent_id: agentId } } });
     if (error) return error.message;
-    // The user needs to be created in the profiles table, often done with a trigger/function in Supabase
     setNotification({ message: 'Registration successful! Please check your email to verify.', type: 'success'});
     return null;
   };
@@ -141,41 +332,23 @@ const App: React.FC = () => {
     const handleChangePassword = async (_oldPassword: string, newPassword: string): Promise<string | null> => {
         if (!supabase) return "Supabase not configured";
         const { error } = await supabase.auth.updateUser({ password: newPassword });
-        if (error) {
-            return error.message;
-        }
+        if (error) { return error.message; }
         setNotification({ message: "Password updated successfully!", type: "success" });
         return null;
     };
 
   const handlePlaceBet = async (amount: number, choice: 'RED' | 'WHITE'): Promise<string | null> => {
-    if (!currentUser) return "Not logged in";
-    if (!supabase) return "Supabase not configured";
-    if (fightState.fightId === null) return "No active fight to bet on.";
+    if (!currentUser || !supabase || !activeFight) return "An error occurred.";
     if (currentUser.coinBalance < amount) return "Insufficient balance";
 
     setLoading(true);
-    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-    const { data, error } = await (supabase.rpc as any)('place_bet', {
-      p_fight_id: fightState.fightId,
-      p_amount: amount,
-      p_choice: choice
-    });
+    const { data, error } = await (supabase.rpc as any)('place_bet', { p_fight_id: activeFight.id, p_amount: amount, p_choice: choice });
     setLoading(false);
 
-    if (error) {
-      console.error("Error placing bet:", error);
-      return error.message;
-    }
+    if (error) { return error.message; }
+    if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
 
-    // FIX: This check is now valid as casting supabase.rpc to 'any' makes `data` of type `any`.
-    if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
-      return data;
-    }
-
-    // Optimistic update of balance.
     setCurrentUser(u => u ? { ...u, coinBalance: u.coinBalance - amount } : null);
-    setCurrentBet({ id: 'temp-bet-' + Math.random(), userId: currentUser.id, fightId: fightState.fightId, amount, choice });
     setNotification({message: 'Bet placed successfully!', type: 'success'});
     return null;
   }
@@ -183,43 +356,21 @@ const App: React.FC = () => {
   const handleCreateAgent = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    const { data, error } = await (supabase.rpc as any)('create_agent_user', {
-        p_name: name,
-        p_email: email,
-        p_password: password
-    });
+    const { data, error } = await (supabase.rpc as any)('create_agent_user', { p_name: name, p_email: email, p_password: password });
     setLoading(false);
-
-    if (error) {
-        console.error("Error creating agent:", error);
-        return error.message;
-    }
-    
-    if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
-        return data;
-    }
-
-    setNotification({ message: 'Agent created successfully! You may need to refresh to see them in your list.', type: 'success' });
+    if (error) { return error.message; }
+    if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
+    setNotification({ message: 'Agent created successfully!', type: 'success' });
     return null;
   };
   
   const handleAddUpcomingFight = async (red: string, white: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-    const { error } = await (supabase.rpc as any)('add_upcoming_fight', {
-        p_red_text: red,
-        p_white_text: white
-    });
+    const { error } = await (supabase.rpc as any)('add_upcoming_fight', { p_red_text: red, p_white_text: white });
     setLoading(false);
-
-    if (error) {
-        console.error("Error adding upcoming fight:", error);
-        return error.message;
-    }
-    
+    if (error) { return error.message; }
     setNotification({ message: 'Fight added to queue!', type: 'success' });
-    // In a real app, we would refetch upcoming fights here.
     return null;
   };
 
@@ -228,100 +379,48 @@ const App: React.FC = () => {
     setLoading(true);
     const { error } = await supabase.rpc('start_next_fight');
     setLoading(false);
-
-    if (error) {
-        console.error("Error starting next fight:", error);
-        setNotification({ message: error.message, type: 'error' });
-        return error.message;
-    }
-    
+    if (error) { setNotification({ message: error.message, type: 'error' }); return error.message; }
     setNotification({ message: 'Next fight started!', type: 'success' });
-    // This should trigger a state refresh for the fight state.
     return null;
   };
 
   const handleCloseBetting = async (): Promise<string | null> => {
-    if (!supabase) return "Supabase not configured";
-    if (fightState.fightId === null) return "No active fight.";
-    
+    if (!supabase || !activeFight) return "No active fight.";
     setLoading(true);
-    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-    const { error } = await (supabase.rpc as any)('close_betting', {
-        p_fight_id: fightState.fightId
-    });
+    const { error } = await (supabase.rpc as any)('close_betting', { p_fight_id: activeFight.id });
     setLoading(false);
-
-    if (error) {
-        console.error("Error closing betting:", error);
-        setNotification({ message: error.message, type: 'error' });
-        return error.message;
-    }
-    
+    if (error) { setNotification({ message: error.message, type: 'error' }); return error.message; }
     setNotification({ message: 'Betting is now closed!', type: 'success' });
     return null;
   };
 
     const handleDeclareWinner = async (winner: FightWinner): Promise<string | null> => {
-        if (!supabase) return "Supabase not configured";
-        if (fightState.fightId === null) return "No active fight to declare winner for.";
-        
+        if (!supabase || !activeFight) return "No active fight to declare winner for.";
         setLoading(true);
-        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-        const { error } = await (supabase.rpc as any)('declare_winner', {
-            p_fight_id: fightState.fightId,
-            p_winner_text: winner
-        });
+        const { error } = await (supabase.rpc as any)('declare_winner', { p_fight_id: activeFight.id, p_winner_text: winner });
         setLoading(false);
-
-        if (error) {
-            console.error("Error declaring winner:", error);
-            setNotification({ message: error.message, type: 'error' });
-            return error.message;
-        }
-
+        if (error) { setNotification({ message: error.message, type: 'error' }); return error.message; }
         setNotification({ message: `Winner declared: ${winner}! Bets are being settled.`, type: 'success' });
         return null;
     };
 
     const handlePlayerRequestCoins = async (amount: number): Promise<string | null> => {
-        if (!currentUser || currentUser.role !== UserRole.PLAYER) return "Invalid user role";
+        if (!currentUser || currentUser.role !== UserRole.PLAYER || !supabase) return "Invalid request";
         const player = currentUser as Player;
         if (!player.agentId) return "You have no agent to request coins from.";
-        if (!supabase) return "Supabase not configured";
-
         setLoading(true);
-        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-        const { error } = await (supabase.rpc as any)('create_coin_request', {
-            p_to_user_id: player.agentId,
-            p_amount: amount
-        });
+        const { error } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: player.agentId, p_amount: amount });
         setLoading(false);
-
-        if (error) {
-            console.error("Error requesting coins:", error);
-            return error.message;
-        }
-        
-        return null; // The modal handles success notification
+        if (error) { return error.message; }
+        return null;
     };
 
     const handleAgentRequestCoins = async (amount: number, targetUserId: string): Promise<string | null> => {
-        if (!currentUser || currentUser.role !== UserRole.AGENT) return "Invalid user role";
-        if (!supabase) return "Supabase not configured";
-
+        if (!currentUser || currentUser.role !== UserRole.AGENT || !supabase) return "Invalid request";
         setLoading(true);
-        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-        const { error } = await (supabase.rpc as any)('create_coin_request', {
-            p_to_user_id: targetUserId,
-            p_amount: amount
-        });
+        const { error } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
         setLoading(false);
-
-        if (error) {
-            console.error("Error requesting coins:", error);
-            return error.message;
-        }
-        
+        if (error) { return error.message; }
         setNotification({ message: 'Coin request sent!', type: 'success' });
         return null;
     };
@@ -329,44 +428,33 @@ const App: React.FC = () => {
     const handleRespondToCoinRequest = async (requestId: string, response: 'APPROVED' | 'DECLINED'): Promise<string | null> => {
         if (!supabase) return "Supabase not configured";
         setLoading(true);
-        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
-        const { data, error } = await (supabase.rpc as any)('respond_to_coin_request', {
-            p_request_id: requestId,
-            p_response: response
-        });
+        const { data, error } = await (supabase.rpc as any)('respond_to_coin_request', { p_request_id: requestId, p_response: response });
         setLoading(false);
-
-        if (error) {
-            console.error("Error responding to coin request:", error);
-            return error.message;
-        }
-
-        // FIX: This check is now valid as casting supabase.rpc to 'any' makes `data` of type `any`.
-        if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
-          return data;
-        }
-
+        if (error) { return error.message; }
+        if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
         setNotification({ message: `Request has been ${response.toLowerCase()}.`, type: 'success' });
-        // This should trigger refetching of coin requests and user balances.
         return null;
     }
 
   const renderUserView = () => {
     if (!currentUser) return null;
+    
+    const fightStatus = activeFight?.status as FightStatus || FightStatus.SETTLED;
+    const fightId = activeFight?.id || null;
 
     switch (currentUser.role) {
       case UserRole.PLAYER:
         return <PlayerView
             currentUser={currentUser as Player}
-            fightStatus={fightState.status}
-            lastWinner={fightState.lastWinner}
-            fightId={fightState.fightId}
-            timer={fightState.timer}
-            bettingPools={fightState.pools}
+            fightStatus={fightStatus}
+            lastWinner={lastWinner}
+            fightId={fightId}
+            timer={timer}
+            bettingPools={bettingPools}
             currentBet={currentBet}
             onPlaceBet={handlePlaceBet}
-            fightHistory={MOCK_HISTORY}
-            upcomingFights={MOCK_UPCOMING}
+            fightHistory={fightHistory}
+            upcomingFights={upcomingFights}
             onRequestCoins={handlePlayerRequestCoins}
             isDrawerOpen={isDrawerOpen}
             onToggleDrawer={() => setDrawerOpen(!isDrawerOpen)}
@@ -374,24 +462,24 @@ const App: React.FC = () => {
       case UserRole.OPERATOR:
         return <OperatorView
             currentUser={currentUser as Operator}
-            fightStatus={fightState.status}
-            lastWinner={fightState.lastWinner}
-            fightId={fightState.fightId}
-            timer={fightState.timer}
-            bettingPools={fightState.pools}
-            liveBets={[]}
-            upcomingFights={MOCK_UPCOMING}
-            completedFights={MOCK_COMPLETED}
-            allUsers={{}}
+            fightStatus={fightStatus}
+            lastWinner={lastWinner}
+            fightId={fightId}
+            timer={timer}
+            bettingPools={bettingPools}
+            liveBets={liveBets}
+            upcomingFights={upcomingFights}
+            completedFights={completedFights}
+            allUsers={allUsers}
             onDeclareWinner={handleDeclareWinner}
             onAddUpcomingFight={handleAddUpcomingFight}
             onStartNextFight={handleStartNextFight}
             onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} />;
+          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} />;
+          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} />;
       default:
         return <div className="p-8 text-center text-red-500">Error: Unknown user role.</div>;
     }

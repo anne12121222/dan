@@ -24,17 +24,16 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ title, transact
         ) : (
           <ul className="divide-y divide-gray-800">
             {transactions.map(tx => {
-              // FIX: Use correct snake_case properties and logic for transaction types.
-              const fromName = tx.type === 'MINT' ? 'SYSTEM' : allUsers[tx.from_user_id!]?.name || 'Unknown';
-              const toName = allUsers[tx.to_user_id!]?.name || 'Unknown';
-              const isCredit = tx.to_user_id === currentUserId;
+              const fromName = tx.type === 'MINT' ? 'SYSTEM' : allUsers[tx.fromUserId!]?.name || 'Unknown';
+              const toName = allUsers[tx.toUserId!]?.name || 'Unknown';
+              const isCredit = tx.toUserId === currentUserId;
 
               const getDescription = () => {
                 if (tx.type === 'COMMISSION') {
                   return isCredit ? `Commission from ${fromName}` : `Paid commission to ${toName}`;
                 }
                 if (tx.type === 'MINT') return `Minted to ${toName}`;
-                if (tx.from_user_id === currentUserId) return `Sent to ${toName}`;
+                if (tx.fromUserId === currentUserId) return `Sent to ${toName}`;
                 return `Received from ${fromName}`;
               };
 
@@ -45,7 +44,7 @@ const TransactionHistory: React.FC<TransactionHistoryProps> = ({ title, transact
                         <p className="font-semibold text-gray-300">
                             {getDescription()}
                         </p>
-                        <p className="text-xs text-gray-500">{new Date(tx.transaction_timestamp).toLocaleString()}</p>
+                        <p className="text-xs text-gray-500">{new Date(tx.transactionTimestamp).toLocaleString()}</p>
                     </div>
                     <span className={`font-bold ${isCredit ? 'text-green-400' : 'text-red-400'}`}>
                       {isCredit ? '+' : '-'}{tx.amount.toLocaleString()}

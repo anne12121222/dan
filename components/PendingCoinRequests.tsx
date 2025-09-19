@@ -30,15 +30,13 @@ const PendingCoinRequests: React.FC<PendingCoinRequestsProps> = ({ requests, onR
         ) : (
           <ul className="divide-y divide-gray-800">
             {pending.map(req => {
-              // FIX: Use correct snake_case property 'from_user_id'.
-              const fromUser = allUsers[req.from_user_id];
+              const fromUser = allUsers[req.fromUserId];
               return (
                 <li key={req.id} className="p-3 flex justify-between items-center">
                     <div>
                         <p className="font-semibold text-gray-300">{fromUser?.name || 'Unknown User'}</p>
                         <p className="text-sm text-yellow-400">{req.amount.toLocaleString()} C</p>
-                        {/* FIX: Use correct snake_case property 'created_at'. */}
-                        <p className="text-xs text-gray-500">{new Date(req.created_at).toLocaleString()}</p>
+                        <p className="text-xs text-gray-500">{new Date(req.createdAt).toLocaleString()}</p>
                     </div>
                     <div className="flex space-x-2">
                         <button

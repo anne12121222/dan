@@ -15,12 +15,12 @@ interface BaseUser {
 
 export interface Player extends BaseUser {
   role: UserRole.PLAYER;
-  agentId: string;
+  agentId: string | null;
 }
 
 export interface Agent extends BaseUser {
   role: UserRole.AGENT;
-  masterAgentId: string;
+  masterAgentId: string | null;
   commissionBalance: number;
   commissionRate: number;
   transferFee: number;
@@ -78,10 +78,10 @@ export interface UpcomingFight {
 export interface Transaction {
     id: string;
     type: 'MINT' | 'TRANSFER' | 'COMMISSION' | 'BET' | 'WINNING' | 'REFUND';
-    from_user_id: string | null;
-    to_user_id: string | null;
+    fromUserId: string | null;
+    toUserId: string | null;
     amount: number;
-    transaction_timestamp: string;
+    transactionTimestamp: string;
 }
 
 export interface Message {
@@ -94,11 +94,11 @@ export interface Message {
 
 export interface CoinRequest {
   id: string;
-  from_user_id: string;
-  to_user_id: string;
+  fromUserId: string;
+  toUserId: string;
   amount: number;
   status: 'PENDING' | 'APPROVED' | 'DECLINED';
-  created_at: string;
+  createdAt: string;
 }
 
 export interface AuthViewProps {
