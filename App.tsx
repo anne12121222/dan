@@ -6,6 +6,8 @@
 
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -73,6 +75,7 @@ const App: React.FC = () => {
 
   // --- LIVE DATA STATES (replaces mocks) ---
   const [agents, setAgents] = useState<Agent[]>([]); // For registration form & player coin requests
+  const [masterAgents, setMasterAgents] = useState<MasterAgent[]>([]); // For agent coin requests
   const [myAgents, setMyAgents] = useState<Agent[]>([]);
   const [myPlayers, setMyPlayers] = useState<Player[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -96,13 +99,19 @@ const App: React.FC = () => {
 
   // Effect for Auth
   useEffect(() => {
-    // Fetch agents for registration form & for unassigned players
-    const fetchAllAgents = async () => {
+    const fetchPublicRoles = async () => {
         if (!supabase) return;
-        const { data } = await supabase.from('profiles').select('*').eq('role', UserRole.AGENT);
-        if (data) setAgents(data.map(p => mapProfileToUser(p as ProfileRow)).filter(p => p) as Agent[]);
+        // Fetch agents for registration form & for unassigned players
+        const agentPromise = supabase.from('profiles').select('*').eq('role', UserRole.AGENT);
+        // Fetch master agents for unassigned agents
+        const masterAgentPromise = supabase.from('profiles').select('*').eq('role', UserRole.MASTER_AGENT);
+
+        const [agentRes, masterAgentRes] = await Promise.all([agentPromise, masterAgentPromise]);
+
+        if (agentRes.data) setAgents(agentRes.data.map(p => mapProfileToUser(p as ProfileRow)).filter(p => p) as Agent[]);
+        if (masterAgentRes.data) setMasterAgents(masterAgentRes.data.map(p => mapProfileToUser(p as ProfileRow)).filter(p => p) as MasterAgent[]);
     };
-    fetchAllAgents();
+    fetchPublicRoles();
 
     supabase?.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => setSession(session)) ?? { data: { subscription: null } };
@@ -505,10 +514,10 @@ const App: React.FC = () => {
         setLoading(false);
         if (error) { return error.message; }
         
-        // Custom check for unassigned players for better UX
-        const player = currentUser as Player;
-        if (!player.agentId) {
-             setNotification({ message: 'Coin request sent! If approved, this agent will become your assigned agent.', type: 'success' });
+        // Custom check for unassigned players/agents for better UX
+        const user = currentUser as Player | Agent;
+        if ((user.role === UserRole.PLAYER && !user.agentId) || (user.role === UserRole.AGENT && !user.masterAgentId)) {
+             setNotification({ message: 'Coin request sent! If approved, this user will become your assigned superior.', type: 'success' });
         } else {
              setNotification({ message: 'Coin request sent!', type: 'success' });
         }
@@ -587,7 +596,7 @@ const App: React.FC = () => {
             onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={setChatTargetUser} />;
+          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={setChatTargetUser} masterAgents={masterAgents} />;
       case UserRole.MASTER_AGENT:
           return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={setChatTargetUser} />;
       default:

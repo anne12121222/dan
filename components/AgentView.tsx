@@ -12,6 +12,7 @@ interface AgentViewProps {
   allUsers: { [id: string]: AllUserTypes };
   transactions: Transaction[];
   coinRequests: CoinRequest[];
+  masterAgents: MasterAgent[]; // Now receives the full list
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onRequestCoins: (amount: number, targetUserId: string) => Promise<string | null>;
   onStartChat: (user: AllUserTypes) => void;
@@ -23,13 +24,18 @@ const AgentView: React.FC<AgentViewProps> = ({
   allUsers,
   transactions,
   coinRequests,
+  masterAgents,
   onRespondToRequest,
   onRequestCoins,
   onStartChat
 }) => {
     const [isRequestingCoins, setIsRequestingCoins] = useState(false);
 
-    const masterAgent = Object.values(allUsers).find(u => u.role === 'MASTER_AGENT' && u.id === currentUser.masterAgentId) as MasterAgent | undefined;
+    const assignedMasterAgent = currentUser.masterAgentId ? allUsers[currentUser.masterAgentId] as MasterAgent | undefined : undefined;
+    
+    const handleRequestSubmit = async (amount: number, targetUserId: string) => {
+        return await onRequestCoins(amount, targetUserId);
+    };
 
   return (
     <div className="min-h-screen bg-zinc-900 text-white p-4 lg:p-8">
@@ -77,14 +83,18 @@ const AgentView: React.FC<AgentViewProps> = ({
                         >
                             Request Coins
                         </button>
-                        {masterAgent && (
+                        {assignedMasterAgent ? (
                             <button
-                                onClick={() => onStartChat(masterAgent)}
+                                onClick={() => onStartChat(assignedMasterAgent)}
                                 className="w-full p-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg transition flex items-center justify-center space-x-2"
                             >
                                 <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
                                 <span>Chat M.A.</span>
                             </button>
+                        ) : (
+                            <div className="w-full p-2 bg-gray-600 text-white font-bold rounded-lg flex items-center justify-center space-x-2 text-center text-xs">
+                                <span>No M. Agent Assigned</span>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -92,11 +102,11 @@ const AgentView: React.FC<AgentViewProps> = ({
             <PendingCoinRequests title="Player Coin Requests" requests={coinRequests} onRespond={onRespondToRequest} allUsers={allUsers} />
         </div>
       </div>
-      {isRequestingCoins && masterAgent && (
+      {isRequestingCoins && (
           <RequestCoinsToMasterAgentModal
             onClose={() => setIsRequestingCoins(false)}
-            onSubmit={onRequestCoins}
-            masterAgents={[masterAgent]}
+            onSubmit={handleRequestSubmit}
+            masterAgents={assignedMasterAgent ? [assignedMasterAgent] : masterAgents}
           />
       )}
     </div>

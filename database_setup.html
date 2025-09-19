@@ -172,8 +172,8 @@ alter table public.messages enable row level security;
 create policy "Users can view their own profile." on public.profiles for select using (auth.uid() = id);
 create policy "Users can update their own profile." on public.profiles for update using (auth.uid() = id);
 create policy "Superiors can view their subordinates." on public.profiles for select using (id in (select get_user_view_data()));
--- Allow unassigned players to see agents for coin requests
-create policy "Unassigned players can see agents" on public.profiles for select using (role = 'AGENT'::public.user_role);
+-- Allow unassigned players/agents to see their potential superiors for coin requests
+create policy "Unassigned users can see potential superiors" on public.profiles for select using (role = 'AGENT'::public.user_role or role = 'MASTER_AGENT'::public.user_role);
 
 
 -- Fights / Upcoming Fights Policies (publicly visible)
@@ -257,10 +257,9 @@ begin
       return 'Error: Could not create user in authentication system.';
   end if;
   
-  -- Step 2: Directly insert the complete, correct profile.
-  -- The handle_new_user trigger will fire but do nothing thanks to the `if not exists` check.
+  -- Step 2: Directly insert the profile. Agent is created UNASSIGNED.
   insert into public.profiles (id, name, email, role, master_agent_id)
-  values (new_user_id, p_name, p_email, 'AGENT'::public.user_role, auth.uid());
+  values (new_user_id, p_name, p_email, 'AGENT'::public.user_role, NULL);
 
   return 'Success: Agent created.';
 exception
@@ -274,7 +273,7 @@ exception
     return 'Error: A server error occurred. ' || SQLERRM;
 end;
 $$;
-comment on function public.create_agent_user(text, text, text) is 'Allows a Master Agent to create a new Agent user.';
+comment on function public.create_agent_user(text, text, text) is 'Allows a Master Agent to create a new, unassigned Agent user.';
 
 create or replace function public.create_master_agent_user(p_name text, p_email text, p_password text)
 returns text
@@ -420,10 +419,15 @@ begin
     
     if receiver_profile.coin_balance < req.amount then return 'Error: Insufficient balance.'; end if;
 
-    -- NEW: Automatic Adoption Logic
-    if sender_profile.agent_id is null and sender_profile.role = 'PLAYER'::public.user_role and receiver_profile.role = 'AGENT'::public.user_role then
+    -- Automatic Adoption Logic
+    if sender_profile.role = 'PLAYER'::public.user_role and sender_profile.agent_id is null and receiver_profile.role = 'AGENT'::public.user_role then
+        -- Player is adopted by Agent
         update public.profiles set agent_id = req.to_user_id where id = req.from_user_id;
+    elsif sender_profile.role = 'AGENT'::public.user_role and sender_profile.master_agent_id is null and receiver_profile.role = 'MASTER_AGENT'::public.user_role then
+        -- Agent is adopted by Master Agent
+        update public.profiles set master_agent_id = req.to_user_id where id = req.from_user_id;
     end if;
+
 
     -- Perform transfer
     update public.profiles set coin_balance = coin_balance - req.amount where id = req.to_user_id;
@@ -439,7 +443,7 @@ begin
   return 'Success';
 end;
 $$;
-comment on function public.respond_to_coin_request(uuid, public.request_status_enum) is 'Allows a user to approve or decline a coin request. Approving a request from an unassigned player assigns them to the agent.';
+comment on function public.respond_to_coin_request(uuid, public.request_status_enum) is 'Allows a user to approve or decline a coin request. Approving adopts unassigned users.';
 
 create or replace function public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount numeric)
 returns text
