@@ -1,10 +1,12 @@
+
 import React, { useState } from 'react';
-import { Agent, Player, AllUserTypes, Transaction, CoinRequest, MasterAgent } from '../types.ts';
+import { Agent, Player, AllUserTypes, Transaction, CoinRequest, MasterAgent, Bet } from '../types.ts';
 import Card from './common/Card.tsx';
 import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 import TransactionHistory from './TransactionHistory.tsx';
 import PendingCoinRequests from './PendingCoinRequests.tsx';
 import RequestCoinsToMasterAgentModal from './RequestCoinsToMasterAgentModal.tsx';
+import LiveBetsList from './LiveBetsList.tsx';
 
 interface AgentViewProps {
   currentUser: Agent;
@@ -13,6 +15,8 @@ interface AgentViewProps {
   transactions: Transaction[];
   coinRequests: CoinRequest[];
   masterAgents: MasterAgent[]; // Now receives the full list
+  liveBets: Bet[];
+  fightId: number | null;
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onRequestCoins: (amount: number, targetUserId: string) => Promise<string | null>;
   onStartChat: (user: AllUserTypes) => void;
@@ -25,6 +29,8 @@ const AgentView: React.FC<AgentViewProps> = ({
   transactions,
   coinRequests,
   masterAgents,
+  liveBets,
+  fightId,
   onRespondToRequest,
   onRequestCoins,
   onStartChat
@@ -69,7 +75,8 @@ const AgentView: React.FC<AgentViewProps> = ({
                     )}
                 </div>
             </Card>
-          <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
+            <LiveBetsList bets={liveBets} allUsers={allUsers} fightId={fightId} />
+            <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
         </div>
         <div className="space-y-4">
             <Card>

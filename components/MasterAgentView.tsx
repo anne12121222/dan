@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { MasterAgent, Agent, AllUserTypes, Transaction, CoinRequest } from '../types.ts';
+import { MasterAgent, Agent, AllUserTypes, Transaction, CoinRequest, Bet } from '../types.ts';
 import Card from './common/Card.tsx';
 import { UsersIcon, UserPlusIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 import TransactionHistory from './TransactionHistory.tsx';
@@ -7,6 +8,8 @@ import PendingCoinRequests from './PendingCoinRequests.tsx';
 import CreateAgentModal from './CreateAgentModal.tsx';
 import CreateMasterAgentModal from './CreateMasterAgentModal.tsx';
 import CreateOperatorModal from './CreateOperatorModal.tsx';
+import LiveBetsList from './LiveBetsList.tsx';
+import LiveBetCounts from './LiveBetCounts.tsx';
 
 
 interface MasterAgentViewProps {
@@ -15,6 +18,8 @@ interface MasterAgentViewProps {
   allUsers: { [id: string]: AllUserTypes };
   transactions: Transaction[];
   coinRequests: CoinRequest[];
+  liveBets: Bet[];
+  fightId: number | null;
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
   onCreateMasterAgent: (name: string, email: string, password: string) => Promise<string | null>;
@@ -28,6 +33,8 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   allUsers,
   transactions,
   coinRequests,
+  liveBets,
+  fightId,
   onRespondToRequest,
   onCreateAgent,
   onCreateMasterAgent,
@@ -37,6 +44,12 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
     const [isCreatingMasterAgent, setIsCreatingMasterAgent] = useState(false);
     const [isCreatingOperator, setIsCreatingOperator] = useState(false);
+
+    const betCounts = liveBets.reduce((acc, bet) => {
+        if (bet.choice === 'RED') acc.red++;
+        if (bet.choice === 'WHITE') acc.white++;
+        return acc;
+    }, { red: 0, white: 0 });
 
 
   return (
@@ -92,7 +105,9 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                     </button>
                 </div>
             </Card>
-          <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
+            <LiveBetCounts counts={betCounts} />
+            <LiveBetsList bets={liveBets} allUsers={allUsers} fightId={fightId} />
+            <TransactionHistory title="My Transactions" transactions={transactions} allUsers={allUsers} currentUserId={currentUser.id} />
         </div>
         <div className="space-y-4">
             <Card>

@@ -1,13 +1,4 @@
 
-
-
-
-
-
-
-
-
-
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -174,13 +165,14 @@ const App: React.FC = () => {
         }
 
         // Role-specific data
-        if (currentUser.role === UserRole.OPERATOR) {
-            // Operator needs to see all users to display names in the bet list.
+        if (currentUser.role === UserRole.OPERATOR || currentUser.role === UserRole.MASTER_AGENT) {
+            // Operators & Master Agents need all users for live bet list names.
             const { data } = await supabase.from('profiles').select('id'); // Just get IDs to be efficient
             if (data) {
                 (data as { id: string }[]).forEach(p => userIdsToFetch.add(p.id));
             }
         }
+
         if (currentUser.role === UserRole.MASTER_AGENT) {
             const { data } = await supabase.from('profiles').select('*').eq('master_agent_id', currentUser.id);
             if (data) {
@@ -531,6 +523,10 @@ const App: React.FC = () => {
         setLoading(false);
         if (error) { return error.message; }
         if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
+        
+        // Optimistic UI update for instant feedback
+        setCoinRequests(currentRequests => currentRequests.filter(req => req.id !== requestId));
+        
         setNotification({ message: `Request has been ${response.toLowerCase()}.`, type: 'success' });
         return null;
     }
@@ -577,6 +573,7 @@ const App: React.FC = () => {
             onToggleDrawer={() => setDrawerOpen(!isDrawerOpen)}
             allUsers={allUsers}
             onStartChat={setChatTargetUser}
+            liveBets={liveBets}
         />;
       case UserRole.OPERATOR:
         return <OperatorView
@@ -596,9 +593,34 @@ const App: React.FC = () => {
             onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={setChatTargetUser} masterAgents={masterAgents} />;
+          return <AgentView
+              currentUser={currentUser as Agent}
+              myPlayers={myPlayers}
+              allUsers={allUsers}
+              transactions={transactions}
+              coinRequests={coinRequests}
+              onRespondToRequest={handleRespondToCoinRequest}
+              onRequestCoins={handleCreateCoinRequest}
+              onStartChat={setChatTargetUser}
+              masterAgents={masterAgents}
+              liveBets={liveBets}
+              fightId={fightId}
+          />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={setChatTargetUser} />;
+          return <MasterAgentView
+              currentUser={currentUser as MasterAgent}
+              myAgents={myAgents}
+              allUsers={allUsers}
+              transactions={transactions}
+              coinRequests={coinRequests}
+              onRespondToRequest={handleRespondToCoinRequest}
+              onCreateAgent={handleCreateAgent}
+              onCreateMasterAgent={handleCreateMasterAgent}
+              onCreateOperator={handleCreateOperator}
+              onStartChat={setChatTargetUser}
+              liveBets={liveBets}
+              fightId={fightId}
+          />;
       default:
         return <div className="p-8 text-center text-red-500">Error: Unknown user role.</div>;
     }

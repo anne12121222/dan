@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice, AllUserTypes, Agent } from '../types.ts';
 import LiveFeed from './LiveFeed.tsx';
@@ -10,6 +11,7 @@ import RequestCoinsToAgentModal from './RequestCoinsToAgentModal.tsx';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer.tsx';
 import NotificationComponent from './Notification.tsx';
 import { ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
+import LiveBetsList from './LiveBetsList.tsx';
 
 interface PlayerViewProps {
   currentUser: Player;
@@ -28,6 +30,7 @@ interface PlayerViewProps {
   onToggleDrawer: () => void;
   allUsers: { [id: string]: AllUserTypes };
   onStartChat: (user: AllUserTypes) => void;
+  liveBets: Bet[];
 }
 
 const PlayerView: React.FC<PlayerViewProps> = ({
@@ -46,7 +49,8 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   isDrawerOpen,
   onToggleDrawer,
   allUsers,
-  onStartChat
+  onStartChat,
+  liveBets
 }) => {
     const [isRequestingCoins, setIsRequestingCoins] = useState(false);
     
@@ -75,6 +79,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           />
           <BettingPools pools={bettingPools} />
           <Trends fightHistory={fightHistory} />
+          <LiveBetsList bets={liveBets} allUsers={allUsers} fightId={fightId} />
         </div>
 
         {/* Sidebar: Right Column */}
