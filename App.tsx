@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -149,11 +150,32 @@ const App: React.FC = () => {
 
   const handlePlaceBet = async (amount: number, choice: 'RED' | 'WHITE'): Promise<string | null> => {
     if (!currentUser) return "Not logged in";
-    // Mock implementation
-    console.log(`Betting ${amount} on ${choice}`);
+    if (!supabase) return "Supabase not configured";
+    if (fightState.fightId === null) return "No active fight to bet on.";
     if (currentUser.coinBalance < amount) return "Insufficient balance";
+
+    setLoading(true);
+    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+    const { data, error } = await (supabase.rpc as any)('place_bet', {
+      p_fight_id: fightState.fightId,
+      p_amount: amount,
+      p_choice: choice
+    });
+    setLoading(false);
+
+    if (error) {
+      console.error("Error placing bet:", error);
+      return error.message;
+    }
+
+    // FIX: This check is now valid as casting supabase.rpc to 'any' makes `data` of type `any`.
+    if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
+      return data;
+    }
+
+    // Optimistic update of balance.
     setCurrentUser(u => u ? { ...u, coinBalance: u.coinBalance - amount } : null);
-    setCurrentBet({ id: 'temp-bet', userId: currentUser.id, fightId: fightState.fightId, amount, choice });
+    setCurrentBet({ id: 'temp-bet-' + Math.random(), userId: currentUser.id, fightId: fightState.fightId, amount, choice });
     setNotification({message: 'Bet placed successfully!', type: 'success'});
     return null;
   }
@@ -161,9 +183,6 @@ const App: React.FC = () => {
   const handleCreateAgent = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    // FIX: There appears to be a TypeScript inference issue with the supabase.rpc method's types,
-    // causing it to expect 'never' for arguments. Casting `rpc` to `any` here is a pragmatic workaround
-    // to bypass this tooling problem and allow the correctly-structured arguments to be passed.
     const { data, error } = await (supabase.rpc as any)('create_agent_user', {
         p_name: name,
         p_email: email,
@@ -175,19 +194,163 @@ const App: React.FC = () => {
         console.error("Error creating agent:", error);
         return error.message;
     }
-
-    // The RPC returns a text message for success or failure.
-    // The type of `data` is `any` due to the cast above. This runtime check ensures we are
-    // handling a string as expected from the RPC's 'Returns' type.
+    
     if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
         return data;
     }
 
     setNotification({ message: 'Agent created successfully! You may need to refresh to see them in your list.', type: 'success' });
-    // In a real app, we would refetch the list of agents here to update the UI automatically.
     return null;
   };
   
+  const handleAddUpcomingFight = async (red: string, white: string): Promise<string | null> => {
+    if (!supabase) return "Supabase not configured";
+    setLoading(true);
+    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+    const { error } = await (supabase.rpc as any)('add_upcoming_fight', {
+        p_red_text: red,
+        p_white_text: white
+    });
+    setLoading(false);
+
+    if (error) {
+        console.error("Error adding upcoming fight:", error);
+        return error.message;
+    }
+    
+    setNotification({ message: 'Fight added to queue!', type: 'success' });
+    // In a real app, we would refetch upcoming fights here.
+    return null;
+  };
+
+  const handleStartNextFight = async (): Promise<string | null> => {
+    if (!supabase) return "Supabase not configured";
+    setLoading(true);
+    const { error } = await supabase.rpc('start_next_fight');
+    setLoading(false);
+
+    if (error) {
+        console.error("Error starting next fight:", error);
+        setNotification({ message: error.message, type: 'error' });
+        return error.message;
+    }
+    
+    setNotification({ message: 'Next fight started!', type: 'success' });
+    // This should trigger a state refresh for the fight state.
+    return null;
+  };
+
+  const handleCloseBetting = async (): Promise<string | null> => {
+    if (!supabase) return "Supabase not configured";
+    if (fightState.fightId === null) return "No active fight.";
+    
+    setLoading(true);
+    // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+    const { error } = await (supabase.rpc as any)('close_betting', {
+        p_fight_id: fightState.fightId
+    });
+    setLoading(false);
+
+    if (error) {
+        console.error("Error closing betting:", error);
+        setNotification({ message: error.message, type: 'error' });
+        return error.message;
+    }
+    
+    setNotification({ message: 'Betting is now closed!', type: 'success' });
+    return null;
+  };
+
+    const handleDeclareWinner = async (winner: FightWinner): Promise<string | null> => {
+        if (!supabase) return "Supabase not configured";
+        if (fightState.fightId === null) return "No active fight to declare winner for.";
+        
+        setLoading(true);
+        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+        const { error } = await (supabase.rpc as any)('declare_winner', {
+            p_fight_id: fightState.fightId,
+            p_winner_text: winner
+        });
+        setLoading(false);
+
+        if (error) {
+            console.error("Error declaring winner:", error);
+            setNotification({ message: error.message, type: 'error' });
+            return error.message;
+        }
+
+        setNotification({ message: `Winner declared: ${winner}! Bets are being settled.`, type: 'success' });
+        return null;
+    };
+
+    const handlePlayerRequestCoins = async (amount: number): Promise<string | null> => {
+        if (!currentUser || currentUser.role !== UserRole.PLAYER) return "Invalid user role";
+        const player = currentUser as Player;
+        if (!player.agentId) return "You have no agent to request coins from.";
+        if (!supabase) return "Supabase not configured";
+
+        setLoading(true);
+        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+        const { error } = await (supabase.rpc as any)('create_coin_request', {
+            p_to_user_id: player.agentId,
+            p_amount: amount
+        });
+        setLoading(false);
+
+        if (error) {
+            console.error("Error requesting coins:", error);
+            return error.message;
+        }
+        
+        return null; // The modal handles success notification
+    };
+
+    const handleAgentRequestCoins = async (amount: number, targetUserId: string): Promise<string | null> => {
+        if (!currentUser || currentUser.role !== UserRole.AGENT) return "Invalid user role";
+        if (!supabase) return "Supabase not configured";
+
+        setLoading(true);
+        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+        const { error } = await (supabase.rpc as any)('create_coin_request', {
+            p_to_user_id: targetUserId,
+            p_amount: amount
+        });
+        setLoading(false);
+
+        if (error) {
+            console.error("Error requesting coins:", error);
+            return error.message;
+        }
+        
+        setNotification({ message: 'Coin request sent!', type: 'success' });
+        return null;
+    };
+
+    const handleRespondToCoinRequest = async (requestId: string, response: 'APPROVED' | 'DECLINED'): Promise<string | null> => {
+        if (!supabase) return "Supabase not configured";
+        setLoading(true);
+        // FIX: Cast supabase.rpc to any to resolve TypeScript error with RPC function arguments.
+        const { data, error } = await (supabase.rpc as any)('respond_to_coin_request', {
+            p_request_id: requestId,
+            p_response: response
+        });
+        setLoading(false);
+
+        if (error) {
+            console.error("Error responding to coin request:", error);
+            return error.message;
+        }
+
+        // FIX: This check is now valid as casting supabase.rpc to 'any' makes `data` of type `any`.
+        if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
+          return data;
+        }
+
+        setNotification({ message: `Request has been ${response.toLowerCase()}.`, type: 'success' });
+        // This should trigger refetching of coin requests and user balances.
+        return null;
+    }
+
   const renderUserView = () => {
     if (!currentUser) return null;
 
@@ -204,7 +367,7 @@ const App: React.FC = () => {
             onPlaceBet={handlePlaceBet}
             fightHistory={MOCK_HISTORY}
             upcomingFights={MOCK_UPCOMING}
-            onRequestCoins={async () => null}
+            onRequestCoins={handlePlayerRequestCoins}
             isDrawerOpen={isDrawerOpen}
             onToggleDrawer={() => setDrawerOpen(!isDrawerOpen)}
         />;
@@ -220,15 +383,15 @@ const App: React.FC = () => {
             upcomingFights={MOCK_UPCOMING}
             completedFights={MOCK_COMPLETED}
             allUsers={{}}
-            onDeclareWinner={(w) => console.log(`Winner is ${w}`)}
-            onAddUpcomingFight={async () => null}
-            onStartNextFight={() => console.log('start next fight')}
-            onCloseBetting={() => console.log('close betting')}
+            onDeclareWinner={handleDeclareWinner}
+            onAddUpcomingFight={handleAddUpcomingFight}
+            onStartNextFight={handleStartNextFight}
+            onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={async () => null} onRequestCoins={async () => null} />;
+          return <AgentView currentUser={currentUser as Agent} myPlayers={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={async () => null} onCreateAgent={handleCreateAgent} />;
+          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={[]} allUsers={{}} transactions={[]} coinRequests={[]} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} />;
       default:
         return <div className="p-8 text-center text-red-500">Error: Unknown user role.</div>;
     }

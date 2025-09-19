@@ -199,7 +199,19 @@ export interface Database {
       [_ in never]: never
     }
     Functions: {
-      // FIX: Added type definition for the create_agent_user RPC to resolve typing errors in App.tsx.
+      add_upcoming_fight: {
+        Args: {
+          p_red_text: string
+          p_white_text: string
+        }
+        Returns: undefined
+      }
+      close_betting: {
+        Args: {
+          p_fight_id: number
+        }
+        Returns: undefined
+      }
       create_agent_user: {
         Args: {
           p_name: string
@@ -207,6 +219,39 @@ export interface Database {
           p_password: string
         }
         Returns: string
+      }
+      create_coin_request: {
+        Args: {
+          p_to_user_id: string
+          p_amount: number
+        }
+        Returns: undefined
+      }
+      declare_winner: {
+        Args: {
+          p_fight_id: number
+          p_winner_text: "RED" | "WHITE" | "DRAW" | "CANCELLED"
+        }
+        Returns: undefined
+      }
+      place_bet: {
+        Args: {
+          p_fight_id: number
+          p_amount: number
+          p_choice: "RED" | "WHITE"
+        }
+        Returns: string
+      }
+      respond_to_coin_request: {
+        Args: {
+          p_request_id: string
+          p_response: "APPROVED" | "DECLINED"
+        }
+        Returns: string
+      }
+      start_next_fight: {
+        Args: {}
+        Returns: undefined
       }
     }
     Enums: {

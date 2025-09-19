@@ -240,13 +240,12 @@ begin
   end if;
 
   -- Create the user in the auth system. This will fire the trigger.
-  select auth.sign_up(jsonb_build_object(
-    'email', p_email,
-    'password', p_password,
-    'options', jsonb_build_object(
-        'data', jsonb_build_object('name', p_name)
-    )
-  )) into new_user_auth_response;
+  -- FIX: Call auth.sign_up with separate arguments, not a single jsonb object.
+  select auth.sign_up(
+    p_email,
+    p_password,
+    jsonb_build_object('data', jsonb_build_object('name', p_name))
+  ) into new_user_auth_response;
 
   new_user_id := (new_user_auth_response->>'id')::uuid;
   
@@ -281,13 +280,12 @@ begin
     return 'Error: Only Master Agents can create new Operators.';
   end if;
 
-  select auth.sign_up(jsonb_build_object(
-    'email', p_email,
-    'password', p_password,
-    'options', jsonb_build_object(
-        'data', jsonb_build_object('name', p_name)
-    )
-  )) into new_user_auth_response;
+  -- FIX: Call auth.sign_up with separate arguments, not a single jsonb object.
+  select auth.sign_up(
+    p_email,
+    p_password,
+    jsonb_build_object('data', jsonb_build_object('name', p_name))
+  ) into new_user_auth_response;
 
   new_user_id := (new_user_auth_response->>'id')::uuid;
 
