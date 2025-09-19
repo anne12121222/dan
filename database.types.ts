@@ -256,6 +256,18 @@ export interface Database {
         }
         Returns: Json
       },
+      get_my_coin_requests: {
+        Args: Record<string, never>
+        Returns: Json
+      },
+      get_my_transactions: {
+        Args: Record<string, never>
+        Returns: Json
+      },
+      get_player_fight_history: {
+        Args: Record<string, never>
+        Returns: Json
+      },
       place_bet: {
         Args: {
           p_fight_id: number
