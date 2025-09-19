@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -137,11 +135,10 @@ const App: React.FC = () => {
     }
   }, [session]);
 
-  // Effect for fetching all user-dependent data and subscribing to channels
-  useEffect(() => {
-    if (!supabase || !currentUser) return;
+    // Main data fetching function, wrapped in a useCallback to be stable
+    const fetchAllData = React.useCallback(async () => {
+        if (!supabase || !currentUser) return;
 
-    const fetchAllData = async () => {
         const userIdsToFetch = new Set<string>([currentUser.id]);
         
         // Fetch common data: transactions and coin requests
@@ -207,8 +204,77 @@ const App: React.FC = () => {
             });
             setAllUsers(userMap);
         }
-    };
+    }, [currentUser, supabase]);
 
+
+    // Main data fetching function for fight data
+    const fetchActiveFight = React.useCallback(async () => {
+        if (!supabase) return;
+        
+        // Fetch upcoming fights
+        const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+        if (upcomingData) {
+            const upcoming = upcomingData as UpcomingFightRow[];
+            setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
+        }
+
+        // Fetch completed fights for trends/history
+        const { data: completedData } = await supabase.from('fights').select('id, winner, commission').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(20);
+        const completed = completedData as Pick<FightRow, "id" | "winner" | "commission">[] | null;
+        if (completed) setCompletedFights(completed as FightResult[]);
+        
+        if (currentUser?.role === UserRole.PLAYER) {
+            const { data: historyBetsData } = await supabase.from('bets').select('*').eq('user_id', currentUser.id).in('fight_id', completed?.map(f => f.id) || []);
+            const historyBets = historyBetsData as BetRow[] | null;
+            const historyMap = new Map(historyBets?.map(b => [b.fight_id, b]));
+            setFightHistory(completed?.map(f => {
+                const bet = historyMap.get(f.id);
+                let outcome: 'WIN'|'LOSS'|'REFUND'|null = null;
+                if (bet) {
+                    if (f.winner === 'DRAW' || f.winner === 'CANCELLED') outcome = 'REFUND';
+                    else if (f.winner === bet.choice) outcome = 'WIN';
+                    else outcome = 'LOSS';
+                }
+                return { ...f, bet: bet ? { id: bet.id, userId: bet.user_id, fightId: bet.fight_id, amount: bet.amount, choice: bet.choice } : null, outcome };
+            }) || []);
+        }
+
+
+        // Fetch the currently active fight
+        const { data: fightData } = await supabase.from('fights').select('*').in('status', ['BETTING_OPEN', 'BETTING_CLOSED']).order('id', { ascending: false }).limit(1).single();
+        const fight = fightData as FightRow | null;
+        setActiveFight(fight);
+        setCurrentBet(null); // Reset bet on new fight
+
+        if (fight) {
+            const { data: betsData } = await supabase.from('bets').select('*').eq('fight_id', fight.id);
+            if (betsData) {
+                const bets = betsData as BetRow[];
+                const pools = bets.reduce((acc, b) => {
+                    if (b.choice === 'RED') acc.meron += b.amount;
+                    if (b.choice === 'WHITE') acc.wala += b.amount;
+                    return acc;
+                }, { meron: 0, wala: 0});
+                setBettingPools(pools);
+                setLiveBets(bets.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, amount: b.amount, choice: b.choice })));
+                if (currentUser) {
+                    const userBet = bets.find(b => b.user_id === currentUser.id);
+                    if (userBet) setCurrentBet({ id: userBet.id, userId: userBet.user_id, fightId: userBet.fight_id, amount: userBet.amount, choice: userBet.choice });
+                }
+            }
+        } else {
+             // If no active fight, get the winner of the very last one for the banner
+            const { data: lastFightData } = await supabase.from('fights').select('winner').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(1).single();
+            const lastFight = lastFightData as Pick<FightRow, "winner"> | null;
+            if (lastFight) setLastWinner(lastFight.winner as FightWinner);
+            else setLastWinner(null);
+        }
+    }, [currentUser, supabase]);
+
+
+  // Effect for fetching all user-dependent data and subscribing to channels
+  useEffect(() => {
+    if (!currentUser) return;
     fetchAllData();
 
     // REAL-TIME FIX: Use a single, robust channel for all user-related data.
@@ -219,13 +285,8 @@ const App: React.FC = () => {
         table: 'coin_requests',
         filter: `to_user_id=eq.${currentUser.id}` // Only listen for requests sent TO me
       }, payload => {
-        // Optimistically add new request for instant UI update
-        const newReq = payload.new as CoinRequestRow;
-        setCoinRequests(current => [
-            { id: newReq.id, fromUserId: newReq.from_user_id, toUserId: newReq.to_user_id, amount: newReq.amount, status: newReq.status, createdAt: newReq.created_at },
-            ...current
-        ]);
-        // Notify user
+        // ROBUSTNESS FIX: Refetch all data to ensure consistency.
+        fetchAllData();
         setNotification({ message: 'You have a new coin request!', type: 'success' });
       })
       .on('postgres_changes', {
@@ -252,79 +313,12 @@ const App: React.FC = () => {
     return () => {
         supabase.removeChannel(userChannel);
     };
-  }, [currentUser]);
+  }, [currentUser, fetchAllData]);
 
   // Effect for fetching fight data and subscribing
   useEffect(() => {
     if (!supabase) return;
     
-    const fetchFightData = async (fightId: number | null = null) => {
-        // Fetch upcoming fights
-        const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
-        if (upcomingData) {
-            // FIX: Cast Supabase response data to the correct type.
-            const upcoming = upcomingData as UpcomingFightRow[];
-            setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
-        }
-
-        // Fetch completed fights
-        const { data: completedData } = await supabase.from('fights').select('id, winner, commission').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(20);
-        // FIX: Cast Supabase response data to the correct type.
-        const completed = completedData as Pick<FightRow, "id" | "winner" | "commission">[] | null;
-        if (completed) setCompletedFights(completed as FightResult[]);
-
-        if (fightId && currentUser?.role === UserRole.PLAYER) {
-            const { data: historyBetsData } = await supabase.from('bets').select('*').eq('user_id', currentUser.id).in('fight_id', completed?.map(f => f.id) || []);
-            // FIX: Cast Supabase response data to the correct type.
-            const historyBets = historyBetsData as BetRow[] | null;
-            const historyMap = new Map(historyBets?.map(b => [b.fight_id, b]));
-            setFightHistory(completed?.map(f => {
-                const bet = historyMap.get(f.id);
-                let outcome: 'WIN'|'LOSS'|'REFUND'|null = null;
-                if (bet) {
-                    if (f.winner === 'DRAW' || f.winner === 'CANCELLED') outcome = 'REFUND';
-                    else if (f.winner === bet.choice) outcome = 'WIN';
-                    else outcome = 'LOSS';
-                }
-                return { ...f, bet: bet ? { id: bet.id, userId: bet.user_id, fightId: bet.fight_id, amount: bet.amount, choice: bet.choice } : null, outcome };
-            }) || []);
-        }
-    }
-
-    const fetchActiveFight = async () => {
-        const { data: fightData } = await supabase.from('fights').select('*').in('status', ['BETTING_OPEN', 'BETTING_CLOSED']).order('id', { ascending: false }).limit(1).single();
-        // FIX: Cast Supabase response data to the correct type.
-        const fight = fightData as FightRow | null;
-        setActiveFight(fight);
-        setCurrentBet(null); // Reset bet on new fight
-        if (fight) {
-            fetchFightData(fight.id);
-            const { data: betsData } = await supabase.from('bets').select('*').eq('fight_id', fight.id);
-            if (betsData) {
-                // FIX: Cast Supabase response data to the correct type.
-                const bets = betsData as BetRow[];
-                const pools = bets.reduce((acc, b) => {
-                    if (b.choice === 'RED') acc.meron += b.amount;
-                    if (b.choice === 'WHITE') acc.wala += b.amount;
-                    return acc;
-                }, { meron: 0, wala: 0});
-                setBettingPools(pools);
-                setLiveBets(bets.map(b => ({ id: b.id, userId: b.user_id, fightId: b.fight_id, amount: b.amount, choice: b.choice })));
-                if (currentUser) {
-                    const userBet = bets.find(b => b.user_id === currentUser.id);
-                    if (userBet) setCurrentBet({ id: userBet.id, userId: userBet.user_id, fightId: userBet.fight_id, amount: userBet.amount, choice: userBet.choice });
-                }
-            }
-        } else {
-            fetchFightData(null);
-            const { data: lastFightData } = await supabase.from('fights').select('winner').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(1).single();
-            // FIX: Cast Supabase response data to the correct type.
-            const lastFight = lastFightData as Pick<FightRow, "winner"> | null;
-            if (lastFight) setLastWinner(lastFight.winner as FightWinner);
-            else setLastWinner(null);
-        }
-    }
-
     fetchActiveFight();
     
     const fightChannel = supabase.channel('public-fights').on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchActiveFight).subscribe();
@@ -336,7 +330,7 @@ const App: React.FC = () => {
         supabase.removeChannel(betsChannel);
         supabase.removeChannel(upcomingChannel);
     };
-  }, [currentUser]);
+  }, [currentUser, fetchActiveFight]);
 
   // Effect for client-side timer
   useEffect(() => {
@@ -496,12 +490,8 @@ const App: React.FC = () => {
     setLoading(false);
     if (error) { return error.message; }
     
-    // ROBUSTNESS FIX: Manually refetch upcoming fights to guarantee the UI updates instantly for the operator.
-    const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
-    if (upcomingData) {
-        const upcoming = upcomingData as UpcomingFightRow[];
-        setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
-    }
+    // ROBUSTNESS FIX: Call the main fetch function to guarantee the UI updates instantly.
+    fetchActiveFight();
 
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;
