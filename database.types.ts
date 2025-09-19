@@ -6,7 +6,9 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export interface Database {
+// FIX: Changed 'interface' to 'type' to allow for correct type inference by the Supabase client.
+// This is the root cause of the 'never' type errors in App.tsx.
+export type Database = {
   public: {
     Tables: {
       bets: {

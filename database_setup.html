@@ -36,14 +36,14 @@ DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, text);
 DROP FUNCTION IF EXISTS public.get_messages(uuid);
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric);
 
--- Drop tables in reverse order of dependency
-DROP TABLE IF EXISTS public.messages;
-DROP TABLE IF EXISTS public.transactions;
-DROP TABLE IF EXISTS public.coin_requests;
-DROP TABLE IF EXISTS public.bets;
-DROP TABLE IF EXISTS public.upcoming_fights;
-DROP TABLE IF EXISTS public.fights;
-DROP TABLE IF EXISTS public.profiles;
+-- Drop tables in reverse order of dependency, using CASCADE to remove dependent objects
+DROP TABLE IF EXISTS public.messages CASCADE;
+DROP TABLE IF EXISTS public.transactions CASCADE;
+DROP TABLE IF EXISTS public.coin_requests CASCADE;
+DROP TABLE IF EXISTS public.bets CASCADE;
+DROP TABLE IF EXISTS public.upcoming_fights CASCADE;
+DROP TABLE IF EXISTS public.fights CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
 
 -- Drop custom types
 DROP TYPE IF EXISTS public.user_role;
@@ -357,6 +357,8 @@ DECLARE
     commission_rate numeric := 0.07;
     total_commission numeric;
     winning_bet record;
+    payout_amount numeric;
+    player_share numeric;
 BEGIN
     -- Update fight status
     UPDATE public.fights SET winner = winner_choice, status = 'SETTLED', settled_at = now() WHERE id = p_fight_id;
@@ -381,16 +383,12 @@ BEGIN
         
         -- Distribute winnings to winners
         FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice = winner_choice::bet_choice LOOP
-            DECLARE
-                payout_amount numeric;
-                player_share numeric;
-            BEGIN
-                player_share := winning_bet.amount / winner_pool;
-                payout_amount := winning_bet.amount + (player_share * (loser_pool - total_commission));
-                UPDATE public.profiles SET coin_balance = coin_balance + payout_amount WHERE id = winning_bet.user_id;
-                INSERT INTO public.transactions (type, to_user_id, amount) VALUES ('WINNING', winning_bet.user_id, payout_amount);
-            END LOOP;
-        END IF;
+            player_share := winning_bet.amount / winner_pool;
+            payout_amount := winning_bet.amount + (player_share * (loser_pool - total_commission));
+            UPDATE public.profiles SET coin_balance = coin_balance + payout_amount WHERE id = winning_bet.user_id;
+            INSERT INTO public.transactions (type, to_user_id, amount) VALUES ('WINNING', winning_bet.user_id, payout_amount);
+        END LOOP;
+    END IF;
 END;
 $$;
 
