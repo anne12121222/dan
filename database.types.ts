@@ -209,7 +209,12 @@ export interface Database {
         }
         // FIX: Changed return type from a self-referencing type to Json to break the circular dependency
         // which was causing the Supabase client to infer 'never' for all RPC calls and table queries.
-        Returns: Json
+        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
+        Returns: {
+          id: number
+          participants: Json
+          created_at: string
+        }[]
       }
       close_betting: {
         Args: {
@@ -259,19 +264,55 @@ export interface Database {
         Args: {
           p_contact_id: string
         }
-        Returns: Json
+        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
+        Returns: {
+          id: string
+          sender_id: string
+          receiver_id: string
+          text: string
+          created_at: string
+        }[]
       }
       get_my_coin_requests: {
         Args: Record<string, never>
-        Returns: Json
+        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
+        Returns: {
+          id: string
+          from_user_id: string
+          to_user_id: string
+          amount: number
+          status: "PENDING" | "APPROVED" | "DECLINED"
+          created_at: string
+        }[]
       }
       get_my_transactions: {
         Args: Record<string, never>
-        Returns: Json
+        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
+        Returns: {
+          id: string
+          type: "MINT" | "TRANSFER" | "COMMISSION" | "BET" | "WINNING" | "REFUND"
+          from_user_id: string | null
+          to_user_id: string | null
+          amount: number
+          transaction_timestamp: string
+        }[]
       }
       get_player_fight_history: {
         Args: Record<string, never>
-        Returns: Json
+        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
+        Returns: {
+          id: number
+          winner: "RED" | "WHITE" | "DRAW" | "CANCELLED"
+          commission: number
+          bet: {
+            id: string
+            user_id: string
+            fight_id: number
+            amount: number
+            choice: "RED" | "WHITE"
+          } | null
+          outcome: "WIN" | "LOSS" | "REFUND" | null
+        }[]
       }
       place_bet: {
         Args: {

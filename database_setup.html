@@ -32,9 +32,15 @@ DROP FUNCTION IF EXISTS public.close_betting(integer);
 DROP FUNCTION IF EXISTS public.declare_winner(integer, text);
 DROP FUNCTION IF EXISTS public.place_bet(integer, numeric, text);
 DROP FUNCTION IF EXISTS public.create_coin_request(uuid, numeric);
+-- FIX: Drop both the old enum-based and new text-based versions to resolve function ambiguity
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, text);
+DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status);
 DROP FUNCTION IF EXISTS public.get_messages(uuid);
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric);
+DROP FUNCTION IF EXISTS public.get_my_coin_requests();
+DROP FUNCTION IF EXISTS public.get_my_transactions();
+DROP FUNCTION IF EXISTS public.get_player_fight_history();
+
 
 -- Drop tables in reverse order of dependency, using CASCADE to remove dependent objects
 DROP TABLE IF EXISTS public.messages CASCADE;
@@ -152,7 +158,7 @@ BEGIN
   INSERT INTO public.profiles (id, name, email, role, agent_id, coin_balance)
   VALUES (
     new.id,
-    new.raw_user_meta_data->>'name',
+    COALESCE(new.raw_user_meta_data->>'name', new.email), -- Use email as name if not provided
     new.email,
     'PLAYER',
     (new.raw_user_meta_data->>'agent_id')::uuid,
@@ -499,6 +505,72 @@ BEGIN
     END IF;
 
     RETURN 'Message sent.';
+END;
+$$;
+
+-- NEW DATA FETCHER FUNCTIONS --
+
+-- Function to get coin requests sent TO the current user
+CREATE OR REPLACE FUNCTION public.get_my_coin_requests()
+RETURNS SETOF public.coin_requests
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT *
+    FROM public.coin_requests
+    WHERE to_user_id = auth.uid();
+END;
+$$;
+
+-- Function to get transactions involving the current user
+CREATE OR REPLACE FUNCTION public.get_my_transactions()
+RETURNS SETOF public.transactions
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT *
+    FROM public.transactions
+    WHERE from_user_id = auth.uid() OR to_user_id = auth.uid()
+    ORDER BY transaction_timestamp DESC;
+END;
+$$;
+
+-- Function for a player to get their full fight history
+CREATE OR REPLACE FUNCTION public.get_player_fight_history()
+RETURNS TABLE(
+    id integer,
+    winner public.fight_winner,
+    commission numeric,
+    bet jsonb,
+    outcome text
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        f.id,
+        f.winner,
+        f.commission,
+        jsonb_build_object(
+            'id', b.id,
+            'userId', b.user_id,
+            'fightId', b.fight_id,
+            'amount', b.amount,
+            'choice', b.choice
+        ) as bet,
+        CASE
+            WHEN b.id IS NULL THEN NULL -- No bet was placed
+            WHEN f.winner = 'DRAW' OR f.winner = 'CANCELLED' THEN 'REFUND'
+            WHEN f.winner::text = b.choice::text THEN 'WIN'
+            ELSE 'LOSS'
+        END::text as outcome
+    FROM public.fights f
+    LEFT JOIN public.bets b ON f.id = b.fight_id AND b.user_id = auth.uid()
+    WHERE f.status = 'SETTLED'
+    ORDER BY f.id DESC;
 END;
 $$;
 

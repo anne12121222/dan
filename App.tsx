@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import {
@@ -249,18 +250,21 @@ const App: React.FC = () => {
     channels.push(upcomingFightsChannel);
 
     // Coin Requests updates
-     const coinRequestsChannel = supabase.channel(`coin_requests_for_${currentUser.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'coin_requests', filter: `to_user_id=eq.${currentUser.id}`}, async () => {
-             const { data, error } = await supabase.rpc('get_my_coin_requests');
-             if(error) console.error("Error refetching coin requests", error);
-             else setCoinRequests(data || []);
-        }).subscribe();
+    const coinRequestsChannel = supabase.channel(`coin_requests_for_${currentUser.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'coin_requests', filter: `to_user_id=eq.${currentUser.id}`}, async () => {
+            // FIX: A new request may come from a new user not in our cache. Fetch all users again.
+            await fetchAllUsers();
+            // Then fetch the updated request list.
+            const { data, error } = await supabase.rpc('get_my_coin_requests');
+            if(error) console.error("Error refetching coin requests", error);
+            else setCoinRequests(data || []);
+      }).subscribe();
     channels.push(coinRequestsChannel);
 
     return () => {
         channels.forEach(channel => supabase.removeChannel(channel));
     };
-  }, [currentUser, fetchFightState, fetchRoleSpecificData]);
+  }, [currentUser, fetchAllUsers, fetchFightState, fetchRoleSpecificData]);
 
 
   // Timer logic
@@ -379,12 +383,16 @@ const App: React.FC = () => {
   };
   
   const handleAddUpcomingFight = async (red: string, white: string) => {
-      const { error } = await supabase.rpc('add_upcoming_fight', { p_red_text: red, p_white_text: white });
+      const { data, error } = await supabase.rpc('add_upcoming_fight', { p_red_text: red, p_white_text: white });
       if (error) {
           showNotification(error.message, 'error');
           return error.message;
       }
       showNotification('Fight added to queue!', 'success');
+      // Optimistically add to UI to make operator controls appear instantly
+      if (data && data.length > 0) {
+        setUpcomingFights(prev => [...prev, data[0]]);
+      }
       return null;
   };
   
