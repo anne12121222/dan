@@ -34,7 +34,7 @@ export interface Database {
           choice?: "RED" | "WHITE"
           created_at?: string
         }
-      }
+      },
       coin_requests: {
           Row: {
               id: string
@@ -60,7 +60,7 @@ export interface Database {
               status?: 'PENDING' | 'APPROVED' | 'DECLINED'
               created_at?: string
           }
-      }
+      },
       fights: {
         Row: {
           id: number
@@ -89,7 +89,7 @@ export interface Database {
           settled_at?: string | null
           commission?: number
         }
-      }
+      },
       messages: {
         Row: {
           id: string
@@ -112,7 +112,7 @@ export interface Database {
           text?: string
           created_at?: string
         }
-      }
+      },
       profiles: {
         Row: {
           id: string
@@ -150,7 +150,7 @@ export interface Database {
           agent_id?: string | null
           master_agent_id?: string | null
         }
-      }
+      },
       transactions: {
           Row: {
               id: string
@@ -176,7 +176,7 @@ export interface Database {
               amount?: number
               transaction_timestamp?: string
           }
-      }
+      },
       upcoming_fights: {
         Row: {
           id: number
