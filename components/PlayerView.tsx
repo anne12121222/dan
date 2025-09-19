@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice, AllUserTypes } from '../types.ts';
+import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice, AllUserTypes, Agent } from '../types.ts';
 import LiveFeed from './LiveFeed.tsx';
 import BettingPools from './BettingPools.tsx';
 import BettingControls from './BettingControls.tsx';
 import Trends from './Trends.tsx';
 import FightHistory from './FightHistory.tsx';
 import RequestCoinsModal from './RequestCoinsModal.tsx';
+import RequestCoinsToAgentModal from './RequestCoinsToAgentModal.tsx';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer.tsx';
 import NotificationComponent from './Notification.tsx';
 import { ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
@@ -21,7 +22,8 @@ interface PlayerViewProps {
   onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
   fightHistory: PlayerFightHistoryEntry[];
   upcomingFights: UpcomingFight[];
-  onRequestCoins: (amount: number) => Promise<string | null>;
+  onRequestCoins: (amount: number, targetUserId: string) => Promise<string | null>;
+  agents: Agent[];
   isDrawerOpen: boolean;
   onToggleDrawer: () => void;
   allUsers: { [id: string]: AllUserTypes };
@@ -40,23 +42,23 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   fightHistory,
   upcomingFights,
   onRequestCoins,
+  agents,
   isDrawerOpen,
   onToggleDrawer,
   allUsers,
   onStartChat
 }) => {
     const [isRequestingCoins, setIsRequestingCoins] = useState(false);
-    const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
     
     const agent = currentUser.agentId ? allUsers[currentUser.agentId] : null;
 
     const handleRequestSubmit = async (amount: number) => {
-        const error = await onRequestCoins(amount);
-        if (error) {
-            return error;
-        }
-        setNotification({ message: 'Coin request sent successfully!', type: 'success' });
-        return null;
+        if (!agent) return "No agent assigned.";
+        return await onRequestCoins(amount, agent.id);
+    };
+    
+    const handleRequestToAnyAgentSubmit = async (amount: number, agentId: string) => {
+        return await onRequestCoins(amount, agentId);
     };
 
   return (
@@ -87,7 +89,7 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                     >
                         Request Coins
                     </button>
-                    {agent && (
+                    {agent ? (
                          <button
                             onClick={() => onStartChat(agent)}
                             className="w-full p-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg transition flex items-center justify-center space-x-2"
@@ -95,6 +97,10 @@ const PlayerView: React.FC<PlayerViewProps> = ({
                             <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
                             <span>Chat Agent</span>
                         </button>
+                    ) : (
+                         <div className="w-full p-2 bg-gray-600 text-white font-bold rounded-lg flex items-center justify-center space-x-2 text-center text-xs">
+                            <span>No Agent Assigned</span>
+                        </div>
                     )}
                 </div>
             </div>
@@ -108,18 +114,20 @@ const PlayerView: React.FC<PlayerViewProps> = ({
           <FightHistory fightHistory={fightHistory} />
         </div>
       </div>
-      {isRequestingCoins && (
+
+      {isRequestingCoins && agent && (
           <RequestCoinsModal
             onClose={() => setIsRequestingCoins(false)}
             onSubmit={handleRequestSubmit}
           />
       )}
-      {notification && (
-        <NotificationComponent
-          message={notification.message}
-          type={notification.type}
-          onClose={() => setNotification(null)}
-        />
+
+      {isRequestingCoins && !agent && (
+          <RequestCoinsToAgentModal
+              onClose={() => setIsRequestingCoins(false)}
+              onSubmit={handleRequestToAnyAgentSubmit}
+              agents={agents}
+          />
       )}
     </div>
   );

@@ -172,6 +172,9 @@ alter table public.messages enable row level security;
 create policy "Users can view their own profile." on public.profiles for select using (auth.uid() = id);
 create policy "Users can update their own profile." on public.profiles for update using (auth.uid() = id);
 create policy "Superiors can view their subordinates." on public.profiles for select using (id in (select get_user_view_data()));
+-- Allow unassigned players to see agents for coin requests
+create policy "Unassigned players can see agents" on public.profiles for select using (role = 'AGENT'::public.user_role);
+
 
 -- Fights / Upcoming Fights Policies (publicly visible)
 create policy "All users can view fights." on public.fights for select using (true);
@@ -195,7 +198,7 @@ create policy "Users can see messages they sent or received." on public.messages
 create policy "Users can send messages." on public.messages for insert with check (auth.uid() = sender_id);
 
 
--- SETUP PHASE 4: USER CREATION TRIGGER (DEFINITIVE FIX)
+-- SETUP PHASE 4: USER CREATION TRIGGER (FOR PUBLIC SIGN-UP ONLY)
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -203,13 +206,14 @@ security definer
 set search_path = public
 as $$
 begin
-  -- Robustness Fix: Check if a profile already exists. This prevents errors if an admin function
-  -- creates the profile manually before the trigger fires.
+  -- This trigger is now ONLY for the public sign-up form.
+  -- Admin creation functions will insert profiles directly.
+  -- The `if not exists` check prevents conflicts.
   if not exists (select 1 from public.profiles where id = new.id) then
     insert into public.profiles (id, name, email, role, agent_id)
     values (
       new.id,
-      coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)), -- Use provided name, or default to email part
+      coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
       new.email,
       'PLAYER'::public.user_role,
       (new.raw_user_meta_data->>'agent_id')::uuid
@@ -218,7 +222,7 @@ begin
   return new;
 end;
 $$;
-comment on function public.handle_new_user is 'Trigger function that fires after a new user signs up.';
+comment on function public.handle_new_user is 'Trigger function that fires after a new user signs up via the public form.';
 
 create trigger on_auth_user_created
   after insert on auth.users
@@ -227,7 +231,7 @@ create trigger on_auth_user_created
 
 -- SETUP PHASE 5: STORED PROCEDURES & FUNCTIONS (RPC)
 
--- User Management RPCs
+-- User Management RPCs (DEFINITIVE FIX)
 create or replace function public.create_agent_user(p_name text, p_email text, p_password text)
 returns text
 language plpgsql
@@ -241,29 +245,33 @@ begin
     return 'Error: Only Master Agents can create new Agents.';
   end if;
 
-  -- Use the admin API to create the user directly. This bypasses email confirmation.
-  select admin.create_user(
-    p_email,
-    p_password,
-    jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
-  )->'id' into new_user_id;
+  -- Step 1: Create the user in the authentication system
+  select auth.admin.create_user(jsonb_build_object(
+    'email', p_email,
+    'password', p_password,
+    'email_confirm', true,
+    'user_metadata', jsonb_build_object('name', p_name)
+  ))->>'id' into new_user_id;
 
   if new_user_id is null then
       return 'Error: Could not create user in authentication system.';
   end if;
   
-  -- The trigger 'on_auth_user_created' already made a 'PLAYER' profile. Now update it.
-  update public.profiles
-  set 
-    role = 'AGENT'::public.user_role,
-    master_agent_id = auth.uid(),
-    agent_id = null
-  where id = new_user_id;
+  -- Step 2: Directly insert the complete, correct profile.
+  -- The handle_new_user trigger will fire but do nothing thanks to the `if not exists` check.
+  insert into public.profiles (id, name, email, role, master_agent_id)
+  values (new_user_id, p_name, p_email, 'AGENT'::public.user_role, auth.uid());
 
   return 'Success: Agent created.';
 exception
+  when unique_violation then
+    perform auth.admin.delete_user(new_user_id); -- Clean up orphaned auth user
+    return 'Error: An account with this email already exists.';
   when others then
-    return 'Error: Could not create agent. ' || SQLERRM;
+    if new_user_id is not null then
+        perform auth.admin.delete_user(new_user_id); -- Clean up orphaned auth user
+    end if;
+    return 'Error: A server error occurred. ' || SQLERRM;
 end;
 $$;
 comment on function public.create_agent_user(text, text, text) is 'Allows a Master Agent to create a new Agent user.';
@@ -277,34 +285,34 @@ as $$
 declare
   new_user_id uuid;
 begin
-  -- For simplicity, we'll allow any existing Master Agent to create another.
-  -- In a real system, you might have a "super" role or another check.
   if not exists (select 1 from public.profiles where id = auth.uid() and role = 'MASTER_AGENT'::public.user_role) then
     return 'Error: Only Master Agents can create new Master Agents.';
   end if;
 
-  select admin.create_user(
-    p_email,
-    p_password,
-    jsonb_build_object('name', p_name)
-  )->'id' into new_user_id;
+  select auth.admin.create_user(jsonb_build_object(
+    'email', p_email,
+    'password', p_password,
+    'email_confirm', true,
+    'user_metadata', jsonb_build_object('name', p_name)
+  ))->>'id' into new_user_id;
 
   if new_user_id is null then
       return 'Error: Could not create user in authentication system.';
   end if;
   
-  -- Update the auto-created PLAYER profile to MASTER_AGENT
-  update public.profiles
-  set 
-    role = 'MASTER_AGENT'::public.user_role,
-    master_agent_id = null, -- Master agents don't have a master agent
-    agent_id = null
-  where id = new_user_id;
+  insert into public.profiles (id, name, email, role)
+  values (new_user_id, p_name, p_email, 'MASTER_AGENT'::public.user_role);
 
   return 'Success: Master Agent created.';
 exception
+  when unique_violation then
+    perform auth.admin.delete_user(new_user_id);
+    return 'Error: An account with this email already exists.';
   when others then
-    return 'Error: Could not create master agent. ' || SQLERRM;
+    if new_user_id is not null then
+        perform auth.admin.delete_user(new_user_id);
+    end if;
+    return 'Error: A server error occurred. ' || SQLERRM;
 end;
 $$;
 comment on function public.create_master_agent_user(text, text, text) is 'Allows a Master Agent to create a new Master Agent user.';
@@ -323,29 +331,30 @@ begin
     return 'Error: Only Master Agents can create new Operators.';
   end if;
 
-  -- Use the admin API to create the user directly.
-  select admin.create_user(
-    p_email,
-    p_password,
-    jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
-  )->'id' into new_user_id;
+  select auth.admin.create_user(jsonb_build_object(
+    'email', p_email,
+    'password', p_password,
+    'email_confirm', true,
+    'user_metadata', jsonb_build_object('name', p_name)
+  ))->>'id' into new_user_id;
 
   if new_user_id is null then
       return 'Error: Could not create user in authentication system.';
   end if;
 
-  -- The trigger 'on_auth_user_created' already made a 'PLAYER' profile. Now update it.
-  update public.profiles
-  set 
-    role = 'OPERATOR'::public.user_role,
-    master_agent_id = null,
-    agent_id = null
-  where id = new_user_id;
+  insert into public.profiles (id, name, email, role)
+  values (new_user_id, p_name, p_email, 'OPERATOR'::public.user_role);
 
   return 'Success: Operator created.';
 exception
+  when unique_violation then
+    perform auth.admin.delete_user(new_user_id);
+    return 'Error: An account with this email already exists.';
   when others then
-    return 'Error: Could not create operator. ' || SQLERRM;
+    if new_user_id is not null then
+        perform auth.admin.delete_user(new_user_id);
+    end if;
+    return 'Error: A server error occurred. ' || SQLERRM;
 end;
 $$;
 comment on function public.create_operator_user(text, text, text) is 'Allows a Master Agent to create a new Operator user.';
@@ -397,7 +406,7 @@ declare
   sender_profile public.profiles;
   receiver_profile public.profiles;
 begin
-  -- Lock rows to prevent deadlocks
+  -- Lock rows to prevent race conditions
   select * into req from public.coin_requests where id = p_request_id for update;
 
   if req is null then return 'Error: Request not found.'; end if;
@@ -405,11 +414,16 @@ begin
   if req.to_user_id <> auth.uid() then return 'Error: You are not the recipient of this request.'; end if;
 
   if p_response = 'APPROVED'::public.request_status_enum then
-    -- Lock profiles in a deterministic order
+    -- Lock profiles in a deterministic order to prevent deadlocks
     select * into receiver_profile from public.profiles where id = req.to_user_id for update;
     select * into sender_profile from public.profiles where id = req.from_user_id for update;
     
     if receiver_profile.coin_balance < req.amount then return 'Error: Insufficient balance.'; end if;
+
+    -- NEW: Automatic Adoption Logic
+    if sender_profile.agent_id is null and sender_profile.role = 'PLAYER'::public.user_role and receiver_profile.role = 'AGENT'::public.user_role then
+        update public.profiles set agent_id = req.to_user_id where id = req.from_user_id;
+    end if;
 
     -- Perform transfer
     update public.profiles set coin_balance = coin_balance - req.amount where id = req.to_user_id;
@@ -425,7 +439,7 @@ begin
   return 'Success';
 end;
 $$;
-comment on function public.respond_to_coin_request(uuid, public.request_status_enum) is 'Allows a user to approve or decline a coin request.';
+comment on function public.respond_to_coin_request(uuid, public.request_status_enum) is 'Allows a user to approve or decline a coin request. Approving a request from an unassigned player assigns them to the agent.';
 
 create or replace function public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount numeric)
 returns text

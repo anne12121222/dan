@@ -4,6 +4,8 @@
 
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -70,7 +72,7 @@ const App: React.FC = () => {
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
   // --- LIVE DATA STATES (replaces mocks) ---
-  const [agents, setAgents] = useState<Agent[]>([]); // For registration form
+  const [agents, setAgents] = useState<Agent[]>([]); // For registration form & player coin requests
   const [myAgents, setMyAgents] = useState<Agent[]>([]);
   const [myPlayers, setMyPlayers] = useState<Player[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -94,13 +96,13 @@ const App: React.FC = () => {
 
   // Effect for Auth
   useEffect(() => {
-    // Fetch agents for registration form
-    const fetchAgentsForRegistration = async () => {
+    // Fetch agents for registration form & for unassigned players
+    const fetchAllAgents = async () => {
         if (!supabase) return;
         const { data } = await supabase.from('profiles').select('*').eq('role', UserRole.AGENT);
         if (data) setAgents(data.map(p => mapProfileToUser(p as ProfileRow)).filter(p => p) as Agent[]);
     };
-    fetchAgentsForRegistration();
+    fetchAllAgents();
 
     supabase?.auth.getSession().then(({ data: { session } }) => setSession(session));
     const { data: authListener } = supabase?.auth.onAuthStateChange((_event, session) => setSession(session)) ?? { data: { subscription: null } };
@@ -496,24 +498,20 @@ const App: React.FC = () => {
         return null;
     };
 
-    const handlePlayerRequestCoins = async (amount: number): Promise<string | null> => {
-        if (!currentUser || currentUser.role !== UserRole.PLAYER || !supabase) return "Invalid request";
+    const handleCreateCoinRequest = async (amount: number, targetUserId: string): Promise<string | null> => {
+        if (!currentUser || !supabase) return "Invalid request";
+        setLoading(true);
+        const { error, data } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
+        setLoading(false);
+        if (error) { return error.message; }
+        
+        // Custom check for unassigned players for better UX
         const player = currentUser as Player;
-        if (!player.agentId) return "You have no agent to request coins from.";
-        setLoading(true);
-        const { error } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: player.agentId, p_amount: amount });
-        setLoading(false);
-        if (error) { return error.message; }
-        return null;
-    };
-
-    const handleAgentRequestCoins = async (amount: number, targetUserId: string): Promise<string | null> => {
-        if (!currentUser || currentUser.role !== UserRole.AGENT || !supabase) return "Invalid request";
-        setLoading(true);
-        const { error } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
-        setLoading(false);
-        if (error) { return error.message; }
-        setNotification({ message: 'Coin request sent!', type: 'success' });
+        if (!player.agentId) {
+             setNotification({ message: 'Coin request sent! If approved, this agent will become your assigned agent.', type: 'success' });
+        } else {
+             setNotification({ message: 'Coin request sent!', type: 'success' });
+        }
         return null;
     };
 
@@ -564,7 +562,8 @@ const App: React.FC = () => {
             onPlaceBet={handlePlaceBet}
             fightHistory={fightHistory}
             upcomingFights={upcomingFights}
-            onRequestCoins={handlePlayerRequestCoins}
+            onRequestCoins={handleCreateCoinRequest}
+            agents={agents}
             isDrawerOpen={isDrawerOpen}
             onToggleDrawer={() => setDrawerOpen(!isDrawerOpen)}
             allUsers={allUsers}
@@ -588,7 +587,7 @@ const App: React.FC = () => {
             onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} onStartChat={setChatTargetUser} />;
+          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={setChatTargetUser} />;
       case UserRole.MASTER_AGENT:
           return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={setChatTargetUser} />;
       default:
