@@ -495,6 +495,14 @@ const App: React.FC = () => {
     const { error } = await (supabase.rpc as any)('add_upcoming_fight', { p_red_text: red, p_white_text: white });
     setLoading(false);
     if (error) { return error.message; }
+    
+    // ROBUSTNESS FIX: Manually refetch upcoming fights to guarantee the UI updates instantly for the operator.
+    const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
+    if (upcomingData) {
+        const upcoming = upcomingData as UpcomingFightRow[];
+        setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
+    }
+
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;
   };
