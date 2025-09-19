@@ -340,7 +340,7 @@ const App: React.FC = () => {
   // Effect for fetching messages and subscribing to chat channel
   useEffect(() => {
     if (!supabase || !currentUser || !chatTargetUser) {
-        setMessages([]);
+        // Do not clear messages when modal is closed, so history is preserved.
         return;
     };
     
@@ -463,8 +463,9 @@ const App: React.FC = () => {
     setLoading(false);
     if (error) { return error.message; }
     
-    // UI update is now handled reliably by the real-time subscription.
-    // No manual refetch is needed.
+    // ROBUSTNESS FIX: Manually refetch fight data immediately after adding a fight.
+    // This ensures the operator sees the "Start Next Fight" button instantly.
+    await fetchActiveFight();
 
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;
