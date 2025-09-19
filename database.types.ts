@@ -1,10 +1,4 @@
-export type Json =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+export type Json = any
 
 // FIX: Reverted from `type` to `interface`. The `type` alias was causing a circular reference
 // issue with the `add_upcoming_fight` function's return type, leading to `never` type
@@ -338,7 +332,7 @@ export interface Database {
         Returns: string
       }
       start_next_fight: {
-        // FIX: The `Args` type for a function with no arguments should be `Record<string, never>`, not `{}`.
+        // FIX: The `Args` type for a function with no arguments should be Record<string, never>, not '{}'.
         // The incorrect type was breaking Supabase client's type inference, causing all RPC and table methods
         // to be inferred as `never`, leading to numerous downstream errors.
         Args: Record<string, never>
