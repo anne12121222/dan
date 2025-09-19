@@ -1,9 +1,11 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
 import { AllUserTypes, UserRole, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry, UpcomingFight, Agent, FightResult, MasterAgent, Operator, Player, Transaction, CoinRequest, Message } from './types.ts';
 import { Database } from './database.types.ts';
+import { v4 as uuidv4 } from 'uuid';
 
 import AuthView from './components/AuthView.tsx';
 import PlayerView from './components/PlayerView.tsx';
@@ -209,18 +211,46 @@ const App: React.FC = () => {
 
     fetchAllData();
 
-    // Setup subscriptions
-    const txChannel = supabase.channel(`transactions-${currentUser.id}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'transactions' }, fetchAllData).subscribe();
-    const crChannel = supabase.channel(`coin_requests-${currentUser.id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'coin_requests' }, fetchAllData).subscribe();
-    const profileChannel = supabase.channel(`profiles-${currentUser.id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${currentUser.id}`}, payload => {
-        const updatedUser = mapProfileToUser(payload.new as any);
-        if (updatedUser) setCurrentUser(updatedUser);
-    }).subscribe();
+    // REAL-TIME FIX: Use a single, robust channel for all user-related data.
+    const userChannel = supabase.channel(`user-data-${currentUser.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'coin_requests',
+        filter: `to_user_id=eq.${currentUser.id}` // Only listen for requests sent TO me
+      }, payload => {
+        // Optimistically add new request for instant UI update
+        const newReq = payload.new as CoinRequestRow;
+        setCoinRequests(current => [
+            { id: newReq.id, fromUserId: newReq.from_user_id, toUserId: newReq.to_user_id, amount: newReq.amount, status: newReq.status, createdAt: newReq.created_at },
+            ...current
+        ]);
+        // Notify user
+        setNotification({ message: 'You have a new coin request!', type: 'success' });
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE', // An update means a response or adoption
+        schema: 'public',
+        table: 'coin_requests',
+      }, fetchAllData) // Refetch all data for consistency after an update
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'transactions',
+      }, fetchAllData) // New transaction, refetch to update balances and history
+      .on('postgres_changes', {
+         event: 'UPDATE',
+         schema: 'public',
+         table: 'profiles',
+         filter: `id=eq.${currentUser.id}`
+      }, payload => {
+         const updatedUser = mapProfileToUser(payload.new as ProfileRow);
+         if (updatedUser) setCurrentUser(updatedUser);
+      })
+      .subscribe();
 
     return () => {
-        supabase.removeChannel(txChannel);
-        supabase.removeChannel(crChannel);
-        supabase.removeChannel(profileChannel);
+        supabase.removeChannel(userChannel);
     };
   }, [currentUser]);
 
@@ -368,7 +398,7 @@ const App: React.FC = () => {
             schema: 'public', 
             table: 'messages',
             // Filter to only get messages relevant to this chat
-            filter: `or(and(sender_id.eq.${currentUser.id},receiver_id.eq.${chatTargetUser.id}),and(sender_id.eq.${chatTargetUser.id},receiver_id.eq.${currentUser.id}))`
+            filter: `receiver_id=eq.${currentUser.id}`
         }, (payload) => {
             const newMessageRow = payload.new as MessageRow;
             const newMessage: Message = { id: newMessageRow.id, senderId: newMessageRow.sender_id, receiverId: newMessageRow.receiver_id, text: newMessageRow.text, createdAt: newMessageRow.created_at };
@@ -532,7 +562,19 @@ const App: React.FC = () => {
     }
 
     const handleSendMessage = async (text: string, amount: number): Promise<void> => {
-        if (!supabase || !chatTargetUser) return;
+        if (!supabase || !chatTargetUser || !currentUser) return;
+        
+        // Optimistic UI update for sender
+        if (text.trim()) {
+            const optimisticMessage: Message = {
+                id: uuidv4(), // temporary client-side ID
+                senderId: currentUser.id,
+                receiverId: chatTargetUser.id,
+                text: text.trim(),
+                createdAt: new Date().toISOString()
+            };
+            setMessages(current => [...current, optimisticMessage]);
+        }
         
         const { error, data } = await (supabase.rpc as any)('send_message_and_coins', {
             p_receiver_id: chatTargetUser.id,
@@ -542,10 +584,13 @@ const App: React.FC = () => {
         
         if (error) {
             setNotification({ message: error.message, type: 'error' });
+            // TODO: Optionally remove the optimistic message on error
         } else if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
             setNotification({ message: data, type: 'error' });
+            // TODO: Optionally remove the optimistic message on error
         }
-        // The real-time subscription will update the message list and user balances.
+        // The real-time subscription will update for the receiver.
+        // Balances will be updated via the 'profiles' table subscription.
     };
 
   const renderUserView = () => {

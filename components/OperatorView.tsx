@@ -43,8 +43,6 @@ const OperatorView: React.FC<OperatorViewProps> = ({
 }) => {
 
   const canDeclareWinner = fightStatus === FightStatus.BETTING_CLOSED;
-  const canStartFight = fightStatus === FightStatus.SETTLED && upcomingFights.length > 0;
-  const canCloseBetting = fightStatus === FightStatus.BETTING_OPEN;
 
   const betCounts = liveBets.reduce((acc, bet) => {
       if (bet.choice === 'RED') acc.red++;
@@ -52,22 +50,38 @@ const OperatorView: React.FC<OperatorViewProps> = ({
       return acc;
   }, { red: 0, white: 0 });
 
-    const getControlStateMessage = () => {
-        if (fightStatus === FightStatus.SETTLED) {
-            if (upcomingFights.length === 0) {
-                return "Add a fight to the queue to begin.";
+  const renderOperatorControls = () => {
+    switch (fightStatus) {
+        case FightStatus.SETTLED:
+            if (upcomingFights.length > 0) {
+                return (
+                    <button
+                        onClick={onStartNextFight}
+                        className="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition animate-pulse"
+                    >
+                        Start Next Fight (#{upcomingFights[0].id})
+                    </button>
+                );
             }
-            return "Ready to start the next fight.";
-        }
-        if (fightStatus === FightStatus.BETTING_OPEN) {
-            return "Betting is currently open.";
-        }
-        if (fightStatus === FightStatus.BETTING_CLOSED) {
-            return "Betting is closed. Declare a winner.";
-        }
-        return "System is idle.";
-    };
+            return <p className="text-sm text-gray-400 text-center py-2">Add a fight to the queue to begin.</p>;
+        
+        case FightStatus.BETTING_OPEN:
+            return (
+                 <button
+                    onClick={onCloseBetting}
+                    className="w-full p-3 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
+                >
+                    Close Betting
+                </button>
+            );
 
+        case FightStatus.BETTING_CLOSED:
+            return <p className="text-sm text-gray-400 text-center py-2">Betting is closed. Declare a winner.</p>;
+
+        default:
+            return <p className="text-sm text-gray-400 text-center py-2">System is idle.</p>;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-zinc-900 text-white p-4 lg:p-8">
@@ -89,25 +103,9 @@ const OperatorView: React.FC<OperatorViewProps> = ({
         <div className="space-y-4">
           <div className="bg-zinc-800/50 rounded-md p-4 space-y-4">
               <h3 className="text-lg font-semibold text-gray-200 border-b border-zinc-700 pb-2">Operator Controls</h3>
-              {canStartFight && (
-                <button
-                  onClick={onStartNextFight}
-                  className="w-full p-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition"
-                >
-                  Start Next Fight (#{upcomingFights[0].id})
-                </button>
-              )}
-              {canCloseBetting && (
-                 <button
-                    onClick={onCloseBetting}
-                    className="w-full p-3 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
-                >
-                    Close Betting
-                </button>
-              )}
-              {!canStartFight && !canCloseBetting && (
-                <p className="text-sm text-gray-400 text-center py-2">{getControlStateMessage()}</p>
-              )}
+              <div className="py-2">
+                {renderOperatorControls()}
+              </div>
           </div>
           <WinnerDeclaration
             onDeclareWinner={onDeclareWinner}

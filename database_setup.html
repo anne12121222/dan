@@ -2,23 +2,32 @@
 -- This script is idempotent and can be run multiple times.
 
 -- SETUP PHASE 1: INITIAL CLEANUP
--- Drop dependent objects first to avoid errors.
+-- REAL-TIME FIX: Drop functions without parameters to remove all possible overloads, fixing ambiguity errors.
 drop trigger if exists on_auth_user_created on auth.users;
-drop function if exists public.handle_new_user();
-drop function if exists public.create_agent_user(text, text, text);
-drop function if exists public.create_operator_user(text, text, text);
-drop function if exists public.create_master_agent_user(text, text, text);
-drop function if exists public.get_registerable_agents();
-drop function if exists public.get_all_users_for_operator();
-drop function if exists public.respond_to_coin_request(uuid, public.request_status_enum);
+drop function if exists public.handle_new_user;
+drop function if exists public.create_agent_user;
+drop function if exists public.create_operator_user;
+drop function if exists public.create_master_agent_user;
+drop function if exists public.get_registerable_agents;
+drop function if exists public.get_all_users_for_operator;
+drop function if exists public.respond_to_coin_request;
+-- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
+drop function if exists public.send_message_and_coins(uuid, text, integer);
 drop function if exists public.send_message_and_coins(uuid, text, numeric);
+-- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
+drop function if exists public.place_bet(integer, integer, public.bet_choice_enum);
 drop function if exists public.place_bet(integer, numeric, public.bet_choice_enum);
--- FIX: Explicitly drop a potential old, overloaded function to resolve ambiguity.
-drop function if exists public.create_coin_request(numeric);
+-- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
+drop function if exists public.create_coin_request(uuid, integer);
 drop function if exists public.create_coin_request(uuid, numeric);
-drop function if exists public.start_next_fight();
+drop function if exists public.start_next_fight;
+-- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
+drop function if exists public.close_betting();
 drop function if exists public.close_betting(integer);
+-- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
+drop function if exists public.declare_winner(integer, text);
 drop function if exists public.declare_winner(integer, public.winner_enum);
+-- FIX: Explicitly drop the function with its arguments to resolve ambiguity.
 drop function if exists public.add_upcoming_fight(text, text);
 
 -- Drop tables in reverse order of dependency. This also removes RLS policies.
@@ -159,7 +168,7 @@ $$;
 comment on function public.get_user_view_data is 'Returns all user IDs a user is allowed to see in their hierarchy.';
 
 
--- SETUP PHASE 3: ROW-LEVEL SECURITY (RLS)
+-- SETUP PHASE 3: ROW-LEVEL SECURITY (RLS) & REAL-TIME
 alter table public.profiles enable row level security;
 alter table public.upcoming_fights enable row level security;
 alter table public.fights enable row level security;
@@ -167,6 +176,15 @@ alter table public.bets enable row level security;
 alter table public.transactions enable row level security;
 alter table public.coin_requests enable row level security;
 alter table public.messages enable row level security;
+
+-- REAL-TIME FIX: Set REPLICA IDENTITY to FULL for tables with RLS that need real-time updates.
+-- This allows Supabase to broadcast changes correctly.
+alter table public.profiles replica identity full;
+alter table public.fights replica identity full;
+alter table public.bets replica identity full;
+alter table public.coin_requests replica identity full;
+alter table public.messages replica identity full;
+
 
 -- Profiles Policies
 create policy "Users can view their own profile." on public.profiles for select using (auth.uid() = id);
@@ -399,6 +417,8 @@ comment on function public.create_coin_request(uuid, numeric) is 'Creates a new 
 create or replace function public.respond_to_coin_request(p_request_id uuid, p_response public.request_status_enum)
 returns text
 language plpgsql
+security definer
+set search_path = public
 as $$
 declare
   req public.coin_requests;
@@ -448,6 +468,8 @@ comment on function public.respond_to_coin_request(uuid, public.request_status_e
 create or replace function public.send_message_and_coins(p_receiver_id uuid, p_text text, p_amount numeric)
 returns text
 language plpgsql
+security definer
+set search_path = public
 as $$
 declare
   sender_profile public.profiles;
@@ -566,6 +588,8 @@ comment on function public.place_bet(integer, numeric, public.bet_choice_enum) i
 create or replace function public.declare_winner(p_fight_id integer, p_winner_text public.winner_enum)
 returns void
 language plpgsql
+security definer
+set search_path = public
 as $$
 declare
   winning_bet record;
