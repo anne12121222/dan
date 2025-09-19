@@ -293,20 +293,32 @@ const App: React.FC = () => {
     if (activeFight?.status === FightStatus.BETTING_OPEN) {
         // This is a rough client-side timer. A real app should sync with server time.
         const start = new Date(activeFight.created_at).getTime();
-        const duration = 30 * 1000; // 30 seconds
+        const duration = 15 * 1000; // 15 seconds as requested
+        
+        let interval: any;
         
         const updateTimer = () => {
             const elapsed = Date.now() - start;
             const remaining = Math.max(0, Math.ceil((duration - elapsed) / 1000));
             setTimer(remaining);
+            
+            // Auto-close betting for operator when timer hits 0
+            if (remaining === 0 && currentUser?.role === UserRole.OPERATOR) {
+                // The check `activeFight.status` is based on the closure, which is fine.
+                // The RPC is idempotent, so it's safe if multiple clients call it.
+                if (activeFight.status === FightStatus.BETTING_OPEN) {
+                    handleCloseBetting();
+                }
+                clearInterval(interval); // Stop this timer loop
+            }
         }
         updateTimer();
-        const interval = setInterval(updateTimer, 1000);
+        interval = setInterval(updateTimer, 1000);
         return () => clearInterval(interval);
     } else {
         setTimer(0);
     }
-  }, [activeFight]);
+  }, [activeFight, currentUser]); // Added currentUser to dependencies
 
 
   const handleLogin = async (email: string, password: string): Promise<string | null> => {

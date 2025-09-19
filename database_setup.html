@@ -248,6 +248,9 @@ begin
   ) into new_user_auth_response;
 
   new_user_id := (new_user_auth_response->>'id')::uuid;
+
+  -- Manually confirm the user's email since this is an admin action
+  update auth.users set email_confirmed_at = now() where id = new_user_id;
   
   -- The trigger created a PLAYER profile. Now we update it to an AGENT.
   update public.profiles
@@ -288,6 +291,9 @@ begin
   ) into new_user_auth_response;
 
   new_user_id := (new_user_auth_response->>'id')::uuid;
+
+  -- Manually confirm the user's email since this is an admin action
+  update auth.users set email_confirmed_at = now() where id = new_user_id;
 
   update public.profiles
   set 
@@ -462,7 +468,7 @@ returns void
 language plpgsql
 as $$
 begin
-  update public.fights set status = 'BETTING_CLOSED'::public.fight_status_enum where id = p_fight_id;
+  update public.fights set status = 'BETTING_CLOSED'::public.fight_status_enum where id = p_fight_id and status = 'BETTING_OPEN'::public.fight_status_enum;
 end;
 $$;
 comment on function public.close_betting(integer) is 'Closes betting for a specific fight.';

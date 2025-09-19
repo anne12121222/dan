@@ -52,6 +52,23 @@ const OperatorView: React.FC<OperatorViewProps> = ({
       return acc;
   }, { red: 0, white: 0 });
 
+    const getControlStateMessage = () => {
+        if (fightStatus === FightStatus.SETTLED) {
+            if (upcomingFights.length === 0) {
+                return "Add a fight to the queue to begin.";
+            }
+            return "Ready to start the next fight.";
+        }
+        if (fightStatus === FightStatus.BETTING_OPEN) {
+            return "Betting is currently open.";
+        }
+        if (fightStatus === FightStatus.BETTING_CLOSED) {
+            return "Betting is closed. Declare a winner.";
+        }
+        return "System is idle.";
+    };
+
+
   return (
     <div className="min-h-screen bg-zinc-900 text-white p-4 lg:p-8">
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -87,6 +104,9 @@ const OperatorView: React.FC<OperatorViewProps> = ({
                 >
                     Close Betting
                 </button>
+              )}
+              {!canStartFight && !canCloseBetting && (
+                <p className="text-sm text-gray-400 text-center py-2">{getControlStateMessage()}</p>
               )}
           </div>
           <WinnerDeclaration
