@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
@@ -261,7 +259,17 @@ const App: React.FC = () => {
     const fetchCurrentState = useCallback(async () => {
         if (!supabase || !currentUser) return;
         
-        const { data, error } = await supabase.from('fights').select('*').order('id', { ascending: false }).limit(1).single();
+        // FIX: Removed .single() to prevent 406 error. Fetch as an array and take the first element.
+        const { data: fightDataArray, error } = await supabase.from('fights').select('*').order('id', { ascending: false }).limit(1);
+        
+        if (error) {
+            console.error("Error fetching current fight state:", error);
+            // Don't change state on error, just log it.
+            return;
+        }
+        
+        const data = (fightDataArray && fightDataArray.length > 0) ? fightDataArray[0] : null;
+
         if (data) {
             const fightId = data.id;
             const { data: bets, error: betsError } = await supabase.from('bets').select('choice, amount').eq('fight_id', fightId);
@@ -302,7 +310,7 @@ const App: React.FC = () => {
                      choice: currentBetData.choice,
                  } : null);
             }
-        } else if (!error) {
+        } else {
              setAppState({ fight_id: null, status: FightStatus.SETTLED, winner: null, betting_ends_at: null, meron_pool: 0, wala_pool: 0 });
         }
     }, [currentUser]);
