@@ -1,9 +1,10 @@
 
 
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
-import { AllUserTypes, UserRole, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry, UpcomingFight, Agent, FightResult, MasterAgent, Operator, Player, Transaction, CoinRequest } from './types.ts';
+import { AllUserTypes, UserRole, FightStatus, FightWinner, Bet, PlayerFightHistoryEntry, UpcomingFight, Agent, FightResult, MasterAgent, Operator, Player, Transaction, CoinRequest, Message } from './types.ts';
 import { Database } from './database.types.ts';
 
 import AuthView from './components/AuthView.tsx';
@@ -14,6 +15,7 @@ import MasterAgentView from './components/MasterAgentView.tsx';
 import Header from './components/Header.tsx';
 import NotificationComponent from './components/Notification.tsx';
 import ChangePasswordModal from './components/ChangePasswordModal.tsx';
+import ChatModal from './components/ChatModal.tsx';
 
 // FIX: Add type aliases for Supabase table rows to fix type inference issues.
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
@@ -22,6 +24,7 @@ type CoinRequestRow = Database["public"]["Tables"]["coin_requests"]["Row"];
 type UpcomingFightRow = Database["public"]["Tables"]["upcoming_fights"]["Row"];
 type FightRow = Database["public"]["Tables"]["fights"]["Row"];
 type BetRow = Database["public"]["Tables"]["bets"]["Row"];
+type MessageRow = Database["public"]["Tables"]["messages"]["Row"];
 
 
 // Helper function to map Supabase profile to frontend user type
@@ -81,6 +84,10 @@ const App: React.FC = () => {
   const [upcomingFights, setUpcomingFights] = useState<UpcomingFight[]>([]);
   const [completedFights, setCompletedFights] = useState<FightResult[]>([]);
   const [fightHistory, setFightHistory] = useState<PlayerFightHistoryEntry[]>([]);
+  
+  // Chat states
+  const [chatTargetUser, setChatTargetUser] = useState<AllUserTypes | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
 
   // Effect for Auth
   useEffect(() => {
@@ -319,6 +326,47 @@ const App: React.FC = () => {
         setTimer(0);
     }
   }, [activeFight, currentUser]); // Added currentUser to dependencies
+  
+  // Effect for fetching messages and subscribing to chat channel
+  useEffect(() => {
+    if (!supabase || !currentUser || !chatTargetUser) {
+        setMessages([]);
+        return;
+    };
+    
+    const fetchMessages = async () => {
+        const { data } = await supabase.from('messages')
+            .select('*')
+            .or(`(sender_id.eq.${currentUser.id},receiver_id.eq.${chatTargetUser.id}),(sender_id.eq.${chatTargetUser.id},receiver_id.eq.${currentUser.id})`)
+            .order('created_at', { ascending: true });
+            
+        if (data) {
+            const mappedMessages = (data as MessageRow[]).map(m => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.text, createdAt: m.created_at }));
+            setMessages(mappedMessages);
+        }
+    }
+    fetchMessages();
+
+    // Unique channel for this conversation
+    const channelId = [currentUser.id, chatTargetUser.id].sort().join('-');
+    const messageChannel = supabase.channel(`messages-${channelId}`)
+        .on('postgres_changes', { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'messages',
+            // Filter to only get messages relevant to this chat
+            filter: `or(and(sender_id.eq.${currentUser.id},receiver_id.eq.${chatTargetUser.id}),and(sender_id.eq.${chatTargetUser.id},receiver_id.eq.${currentUser.id}))`
+        }, (payload) => {
+            const newMessageRow = payload.new as MessageRow;
+            const newMessage: Message = { id: newMessageRow.id, senderId: newMessageRow.sender_id, receiverId: newMessageRow.receiver_id, text: newMessageRow.text, createdAt: newMessageRow.created_at };
+            setMessages(currentMessages => [...currentMessages, newMessage]);
+        })
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(messageChannel);
+    };
+  }, [currentUser, chatTargetUser]);
 
 
   const handleLogin = async (email: string, password: string): Promise<string | null> => {
@@ -448,6 +496,23 @@ const App: React.FC = () => {
         return null;
     }
 
+    const handleSendMessage = async (text: string, amount: number): Promise<void> => {
+        if (!supabase || !chatTargetUser) return;
+        
+        const { error, data } = await (supabase.rpc as any)('send_message_and_coins', {
+            p_receiver_id: chatTargetUser.id,
+            p_text: text,
+            p_amount: amount
+        });
+        
+        if (error) {
+            setNotification({ message: error.message, type: 'error' });
+        } else if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) {
+            setNotification({ message: data, type: 'error' });
+        }
+        // The real-time subscription will update the message list and user balances.
+    };
+
   const renderUserView = () => {
     if (!currentUser) return null;
     
@@ -470,6 +535,8 @@ const App: React.FC = () => {
             onRequestCoins={handlePlayerRequestCoins}
             isDrawerOpen={isDrawerOpen}
             onToggleDrawer={() => setDrawerOpen(!isDrawerOpen)}
+            allUsers={allUsers}
+            onStartChat={setChatTargetUser}
         />;
       case UserRole.OPERATOR:
         return <OperatorView
@@ -489,9 +556,9 @@ const App: React.FC = () => {
             onCloseBetting={handleCloseBetting}
         />;
       case UserRole.AGENT:
-          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} />;
+          return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} onStartChat={setChatTargetUser} />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} />;
+          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onStartChat={setChatTargetUser} />;
       default:
         return <div className="p-8 text-center text-red-500">Error: Unknown user role.</div>;
     }
@@ -524,6 +591,15 @@ const App: React.FC = () => {
           message={notification.message}
           type={notification.type}
           onClose={() => setNotification(null)}
+        />
+      )}
+      {currentUser && chatTargetUser && (
+        <ChatModal
+            currentUser={currentUser}
+            chatTargetUser={chatTargetUser}
+            messages={messages}
+            onClose={() => setChatTargetUser(null)}
+            onSendMessage={handleSendMessage}
         />
       )}
     </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Agent, Player, AllUserTypes, Transaction, CoinRequest, MasterAgent } from '../types.ts';
 import Card from './common/Card.tsx';
-import { UsersIcon } from './common/Icons.tsx';
+import { UsersIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 import TransactionHistory from './TransactionHistory.tsx';
 import PendingCoinRequests from './PendingCoinRequests.tsx';
 import RequestCoinsToMasterAgentModal from './RequestCoinsToMasterAgentModal.tsx';
@@ -14,6 +14,7 @@ interface AgentViewProps {
   coinRequests: CoinRequest[];
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onRequestCoins: (amount: number, targetUserId: string) => Promise<string | null>;
+  onStartChat: (user: AllUserTypes) => void;
 }
 
 const AgentView: React.FC<AgentViewProps> = ({
@@ -23,7 +24,8 @@ const AgentView: React.FC<AgentViewProps> = ({
   transactions,
   coinRequests,
   onRespondToRequest,
-  onRequestCoins
+  onRequestCoins,
+  onStartChat
 }) => {
     const [isRequestingCoins, setIsRequestingCoins] = useState(false);
 
@@ -47,8 +49,11 @@ const AgentView: React.FC<AgentViewProps> = ({
                                         <p className="font-semibold text-gray-300">{player.name}</p>
                                         <p className="text-xs text-gray-500">{player.email}</p>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-yellow-400 font-mono">{player.coinBalance.toLocaleString()} C</p>
+                                    <div className="flex items-center space-x-4">
+                                        <p className="text-yellow-400 font-mono text-right">{player.coinBalance.toLocaleString()} C</p>
+                                        <button onClick={() => onStartChat(player)} className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-zinc-700">
+                                            <ChatBubbleLeftEllipsisIcon className="w-6 h-6" />
+                                        </button>
                                     </div>
                                 </li>
                             ))}
@@ -65,12 +70,23 @@ const AgentView: React.FC<AgentViewProps> = ({
                 <div className="p-4">
                     <h3 className="text-lg font-semibold text-gray-200">My Wallet</h3>
                     <p className="text-3xl font-bold text-yellow-400 my-2">{currentUser.coinBalance.toLocaleString()}</p>
-                    <button
-                        onClick={() => setIsRequestingCoins(true)}
-                        className="w-full mt-2 p-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
-                    >
-                        Request Coins from Master Agent
-                    </button>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                         <button
+                            onClick={() => setIsRequestingCoins(true)}
+                            className="w-full p-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
+                        >
+                            Request Coins
+                        </button>
+                        {masterAgent && (
+                            <button
+                                onClick={() => onStartChat(masterAgent)}
+                                className="w-full p-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg transition flex items-center justify-center space-x-2"
+                            >
+                                <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                                <span>Chat M.A.</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
             </Card>
             <PendingCoinRequests title="Player Coin Requests" requests={coinRequests} onRespond={onRespondToRequest} allUsers={allUsers} />

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MasterAgent, Agent, AllUserTypes, Transaction, CoinRequest } from '../types.ts';
 import Card from './common/Card.tsx';
-import { UsersIcon, UserPlusIcon } from './common/Icons.tsx';
+import { UsersIcon, UserPlusIcon, ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 import TransactionHistory from './TransactionHistory.tsx';
 import PendingCoinRequests from './PendingCoinRequests.tsx';
 import CreateAgentModal from './CreateAgentModal.tsx';
@@ -14,6 +14,7 @@ interface MasterAgentViewProps {
   coinRequests: CoinRequest[];
   onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
   onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
+  onStartChat: (user: AllUserTypes) => void;
 }
 
 const MasterAgentView: React.FC<MasterAgentViewProps> = ({
@@ -24,6 +25,7 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
   coinRequests,
   onRespondToRequest,
   onCreateAgent,
+  onStartChat,
 }) => {
     const [isCreatingAgent, setIsCreatingAgent] = useState(false);
 
@@ -51,8 +53,11 @@ const MasterAgentView: React.FC<MasterAgentViewProps> = ({
                                         <p className="font-semibold text-gray-300">{agent.name}</p>
                                         <p className="text-xs text-gray-500">{agent.email}</p>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="text-yellow-400 font-mono">{agent.coinBalance.toLocaleString()} C</p>
+                                    <div className="flex items-center space-x-4">
+                                        <p className="text-yellow-400 font-mono text-right">{agent.coinBalance.toLocaleString()} C</p>
+                                         <button onClick={() => onStartChat(agent)} className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-zinc-700">
+                                            <ChatBubbleLeftEllipsisIcon className="w-6 h-6" />
+                                        </button>
                                     </div>
                                 </li>
                             ))}

@@ -231,32 +231,28 @@ security definer
 set search_path = ''
 as $$
 declare
-  new_user_auth_response jsonb;
   new_user_id uuid;
-  current_master_agent_id uuid := auth.uid();
 begin
-  if not exists (select 1 from public.profiles where id = current_master_agent_id and role = 'MASTER_AGENT'::public.user_role) then
+  if not exists (select 1 from public.profiles where id = auth.uid() and role = 'MASTER_AGENT'::public.user_role) then
     return 'Error: Only Master Agents can create new Agents.';
   end if;
 
-  -- Create the user in the auth system. This will fire the trigger.
-  -- FIX: Call auth.sign_up with separate arguments, not a single jsonb object.
-  select auth.sign_up(
+  -- Use the admin API to create the user directly. This bypasses email confirmation.
+  select auth.admin.create_user(
     p_email,
     p_password,
-    jsonb_build_object('data', jsonb_build_object('name', p_name))
-  ) into new_user_auth_response;
+    jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
+  )->'id' into new_user_id;
 
-  new_user_id := (new_user_auth_response->>'id')::uuid;
-
-  -- Manually confirm the user's email since this is an admin action
-  update auth.users set email_confirmed_at = now() where id = new_user_id;
+  if new_user_id is null then
+      return 'Error: Could not create user in authentication system.';
+  end if;
   
-  -- The trigger created a PLAYER profile. Now we update it to an AGENT.
+  -- The trigger 'on_auth_user_created' already made a 'PLAYER' profile. Now update it.
   update public.profiles
   set 
     role = 'AGENT'::public.user_role,
-    master_agent_id = current_master_agent_id,
+    master_agent_id = auth.uid(),
     agent_id = null
   where id = new_user_id;
 
@@ -275,26 +271,24 @@ security definer
 set search_path = ''
 as $$
 declare
-  new_user_auth_response jsonb;
   new_user_id uuid;
-  current_master_agent_id uuid := auth.uid();
 begin
-  if not exists (select 1 from public.profiles where id = current_master_agent_id and role = 'MASTER_AGENT'::public.user_role) then
+  if not exists (select 1 from public.profiles where id = auth.uid() and role = 'MASTER_AGENT'::public.user_role) then
     return 'Error: Only Master Agents can create new Operators.';
   end if;
 
-  -- FIX: Call auth.sign_up with separate arguments, not a single jsonb object.
-  select auth.sign_up(
+  -- Use the admin API to create the user directly.
+  select auth.admin.create_user(
     p_email,
     p_password,
-    jsonb_build_object('data', jsonb_build_object('name', p_name))
-  ) into new_user_auth_response;
+    jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
+  )->'id' into new_user_id;
 
-  new_user_id := (new_user_auth_response->>'id')::uuid;
+  if new_user_id is null then
+      return 'Error: Could not create user in authentication system.';
+  end if;
 
-  -- Manually confirm the user's email since this is an admin action
-  update auth.users set email_confirmed_at = now() where id = new_user_id;
-
+  -- The trigger 'on_auth_user_created' already made a 'PLAYER' profile. Now update it.
   update public.profiles
   set 
     role = 'OPERATOR'::public.user_role,
@@ -396,6 +390,10 @@ declare
   receiver_profile public.profiles;
   transfer_fee numeric;
 begin
+  if (p_text is null or p_text = '') and (p_amount is null or p_amount <= 0) then
+      return 'Error: Cannot send an empty message with no coins.';
+  end if;
+
   -- Lock profiles in deterministic order to prevent deadlocks
   if auth.uid() < p_receiver_id then
     select * into sender_profile from public.profiles where id = auth.uid() for update;
@@ -405,7 +403,9 @@ begin
     select * into sender_profile from public.profiles where id = auth.uid() for update;
   end if;
 
-  insert into public.messages (sender_id, receiver_id, text) values (auth.uid(), p_receiver_id, p_text);
+  if p_text is not null and p_text <> '' then
+    insert into public.messages (sender_id, receiver_id, text) values (auth.uid(), p_receiver_id, p_text);
+  end if;
 
   if p_amount > 0 then
     transfer_fee := p_amount * sender_profile.transfer_fee;

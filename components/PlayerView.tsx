@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice } from '../types.ts';
+import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice, AllUserTypes } from '../types.ts';
 import LiveFeed from './LiveFeed.tsx';
 import BettingPools from './BettingPools.tsx';
 import BettingControls from './BettingControls.tsx';
@@ -8,6 +8,7 @@ import FightHistory from './FightHistory.tsx';
 import RequestCoinsModal from './RequestCoinsModal.tsx';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer.tsx';
 import NotificationComponent from './Notification.tsx';
+import { ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 
 interface PlayerViewProps {
   currentUser: Player;
@@ -23,6 +24,8 @@ interface PlayerViewProps {
   onRequestCoins: (amount: number) => Promise<string | null>;
   isDrawerOpen: boolean;
   onToggleDrawer: () => void;
+  allUsers: { [id: string]: AllUserTypes };
+  onStartChat: (user: AllUserTypes) => void;
 }
 
 const PlayerView: React.FC<PlayerViewProps> = ({
@@ -38,11 +41,14 @@ const PlayerView: React.FC<PlayerViewProps> = ({
   upcomingFights,
   onRequestCoins,
   isDrawerOpen,
-  onToggleDrawer
+  onToggleDrawer,
+  allUsers,
+  onStartChat
 }) => {
     const [isRequestingCoins, setIsRequestingCoins] = useState(false);
     const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
-
+    
+    const agent = currentUser.agentId ? allUsers[currentUser.agentId] : null;
 
     const handleRequestSubmit = async (amount: number) => {
         const error = await onRequestCoins(amount);
@@ -74,12 +80,23 @@ const PlayerView: React.FC<PlayerViewProps> = ({
             <div className="bg-zinc-800/50 p-4 rounded-md">
                 <h2 className="text-lg font-semibold text-gray-300">Your Wallet</h2>
                 <p className="text-3xl font-bold text-yellow-400 my-2">{currentUser.coinBalance.toLocaleString()}</p>
-                <button
-                    onClick={() => setIsRequestingCoins(true)}
-                    className="w-full p-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
-                >
-                    Request Coins from Agent
-                </button>
+                 <div className="grid grid-cols-2 gap-2 mt-2">
+                    <button
+                        onClick={() => setIsRequestingCoins(true)}
+                        className="w-full p-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
+                    >
+                        Request Coins
+                    </button>
+                    {agent && (
+                         <button
+                            onClick={() => onStartChat(agent)}
+                            className="w-full p-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg transition flex items-center justify-center space-x-2"
+                        >
+                            <ChatBubbleLeftEllipsisIcon className="w-5 h-5" />
+                            <span>Chat Agent</span>
+                        </button>
+                    )}
+                </div>
             </div>
           <BettingControls
             status={fightStatus}
