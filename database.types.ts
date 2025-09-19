@@ -338,7 +338,10 @@ export interface Database {
         Returns: string
       }
       start_next_fight: {
-        Args: {}
+        // FIX: The `Args` type for a function with no arguments should be `Record<string, never>`, not `{}`.
+        // The incorrect type was breaking Supabase client's type inference, causing all RPC and table methods
+        // to be inferred as `never`, leading to numerous downstream errors.
+        Args: Record<string, never>
         Returns: void
       }
     }
