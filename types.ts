@@ -1,32 +1,21 @@
-// Enums
 export enum UserRole {
-  OPERATOR = 'OPERATOR',
-  MASTER_AGENT = 'MASTER_AGENT',
-  AGENT = 'AGENT',
   PLAYER = 'PLAYER',
+  AGENT = 'AGENT',
+  MASTER_AGENT = 'MASTER_AGENT',
+  OPERATOR = 'OPERATOR',
 }
 
-export enum FightStatus {
-  SETTLED = 'SETTLED', // Waiting for operator to start
-  BETTING_OPEN = 'BETTING_OPEN', // Bets can be placed
-  BETTING_CLOSED = 'BETTING_CLOSED', // Bets are locked, fight in progress
-}
-
-export type BetChoice = 'RED' | 'WHITE';
-export type FightWinner = BetChoice | 'DRAW' | 'CANCELLED';
-
-// Base User
 interface BaseUser {
-  id: string; // UUID from Supabase Auth
+  id: string;
   name: string;
   email: string;
+  role: UserRole;
   coinBalance: number;
 }
 
-// User Roles
 export interface Player extends BaseUser {
   role: UserRole.PLAYER;
-  agentId: string | null;
+  agentId: string;
 }
 
 export interface Agent extends BaseUser {
@@ -48,10 +37,17 @@ export interface Operator extends BaseUser {
   role: UserRole.OPERATOR;
 }
 
-// Union Type for any user
 export type AllUserTypes = Player | Agent | MasterAgent | Operator;
 
-// Betting & Fights
+export enum FightStatus {
+  BETTING_OPEN = 'BETTING_OPEN',
+  BETTING_CLOSED = 'BETTING_CLOSED',
+  SETTLED = 'SETTLED', // Bets are paid out, waiting for next fight
+}
+
+export type BetChoice = 'RED' | 'WHITE';
+export type FightWinner = 'RED' | 'WHITE' | 'DRAW' | 'CANCELLED';
+
 export interface Bet {
   id: string;
   userId: string;
@@ -60,35 +56,40 @@ export interface Bet {
   choice: BetChoice;
 }
 
+export interface FightResult {
+  id: number;
+  winner: FightWinner;
+  commission: number;
+}
+
+export interface PlayerFightHistoryEntry extends FightResult {
+  bet: Bet | null;
+  outcome: 'WIN' | 'LOSS' | 'REFUND' | null;
+}
+
 export interface UpcomingFight {
   id: number;
   participants: {
     red: string;
     white: string;
   };
-  status: 'UPCOMING';
 }
 
-export interface FightResult {
-  id: number;
-  winner: FightWinner;
-  commission: number; // For operator/MA view
-}
-
-// For player-specific history
-export interface PlayerFightHistoryEntry extends FightResult {
-  bet: Bet | null;
-  outcome: 'WIN' | 'LOSS' | 'REFUND' | null;
-}
-
-// Transactions & Requests
 export interface Transaction {
+    id: string;
+    type: 'MINT' | 'TRANSFER' | 'COMMISSION' | 'BET' | 'WINNING' | 'REFUND';
+    from_user_id: string | null;
+    to_user_id: string | null;
+    amount: number;
+    transaction_timestamp: string;
+}
+
+export interface Message {
   id: string;
-  from_user_id: string | null; // null for MINT
-  to_user_id: string;
-  amount: number;
-  type: 'MINT' | 'TRANSFER' | 'COMMISSION';
-  transaction_timestamp: string;
+  senderId: string;
+  receiverId: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface CoinRequest {
@@ -100,61 +101,9 @@ export interface CoinRequest {
   created_at: string;
 }
 
-// Messaging
-export interface Message {
-    id: string;
-    senderId: string;
-    receiverId: string;
-    text: string;
-    amount: number;
-    createdAt: string;
-}
-
-// Component Props
 export interface AuthViewProps {
   onLogin: (email: string, password: string) => Promise<string | null>;
   onRegister: (name: string, email: string, password: string, agentId: string) => Promise<string | null>;
   isSupabaseConfigured: boolean;
   agents: Agent[];
-}
-
-export interface PlayerViewProps {
-  currentUser: Player;
-  fightStatus: FightStatus;
-  fightId: number | null;
-  timer: number;
-  currentBet: Bet | null;
-  bettingPools: { meron: number; wala: number };
-  playerFightHistory: PlayerFightHistoryEntry[];
-  fightHistory: FightResult[]; // For Trends component
-  allUsers: { [id: string]: AllUserTypes }; // Keep this for looking up agent name
-  onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
-  onCreateCoinRequest: (amount: number) => Promise<string | null>;
-  betCounts: { red: number; white: number };
-}
-
-export interface AgentViewProps {
-  currentUser: Agent;
-  players: Player[];
-  transactions: Transaction[];
-  coinRequests: CoinRequest[];
-  allUsers: { [id: string]: AllUserTypes }; // Keep for name lookups
-  onTransferCoins: (receiverId: string, amount: number) => Promise<string | null>;
-  onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
-  onCreateCoinRequest: (amount: number) => Promise<string | null>;
-  onMasquerade: (userId: string) => void;
-  onOpenChat: (user: AllUserTypes) => void;
-}
-
-export interface MasterAgentViewProps {
-  currentUser: MasterAgent;
-  agents: Agent[];
-  transactions: Transaction[];
-  coinRequests: CoinRequest[];
-  allUsers: { [id: string]: AllUserTypes }; // Keep for name lookups
-  onTransferCoins: (receiverId: string, amount: number) => Promise<string | null>;
-  onCreateAgent: (name: string, email: string, password: string) => Promise<string | null>;
-  onRespondToRequest: (requestId: string, response: 'APPROVED' | 'DECLINED') => Promise<string | null>;
-  onMasquerade: (userId: string) => void;
-  onOpenChat: (user: AllUserTypes) => void;
 }

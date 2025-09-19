@@ -11,254 +11,195 @@ export interface Database {
     Tables: {
       bets: {
         Row: {
-          amount: number
-          choice: Database["public"]["Enums"]["bet_choice"]
-          created_at: string
-          fight_id: number
           id: string
           user_id: string
+          fight_id: number
+          amount: number
+          choice: "RED" | "WHITE"
+          created_at: string
         }
         Insert: {
-          amount: number
-          choice: Database["public"]["Enums"]["bet_choice"]
-          created_at?: string
-          fight_id: number
           id?: string
           user_id: string
+          fight_id: number
+          amount: number
+          choice: "RED" | "WHITE"
+          created_at?: string
         }
         Update: {
-          amount?: number
-          choice?: Database["public"]["Enums"]["bet_choice"]
-          created_at?: string
-          fight_id?: number
           id?: string
           user_id?: string
+          fight_id?: number
+          amount?: number
+          choice?: "RED" | "WHITE"
+          created_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "bets_fight_id_fkey"
-            columns: ["fight_id"]
-            referencedRelation: "fights"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bets_user_id_fkey"
-            columns: ["user_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       coin_requests: {
-        Row: {
-          amount: number
-          created_at: string
-          from_user_id: string
-          id: string
-          status: Database["public"]["Enums"]["request_status"]
-          to_user_id: string
-        }
-        Insert: {
-          amount: number
-          created_at?: string
-          from_user_id: string
-          id?: string
-          status?: Database["public"]["Enums"]["request_status"]
-          to_user_id: string
-        }
-        Update: {
-          amount?: number
-          created_at?: string
-          from_user_id?: string
-          id?: string
-          status?: Database["public"]["Enums"]["request_status"]
-          to_user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "coin_requests_from_user_id_fkey"
-            columns: ["from_user_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "coin_requests_to_user_id_fkey"
-            columns: ["to_user_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
+          Row: {
+              id: string
+              from_user_id: string
+              to_user_id: string
+              amount: number
+              status: 'PENDING' | 'APPROVED' | 'DECLINED'
+              created_at: string
           }
-        ]
+          Insert: {
+              id?: string
+              from_user_id: string
+              to_user_id: string
+              amount: number
+              status?: 'PENDING'
+              created_at?: string
+          }
+          Update: {
+              id?: string
+              from_user_id?: string
+              to_user_id?: string
+              amount?: number
+              status?: 'PENDING' | 'APPROVED' | 'DECLINED'
+              created_at?: string
+          }
       }
       fights: {
         Row: {
-          commission_paid_out: boolean
-          created_at: string
           id: number
-          participants: Json
-          status: Database["public"]["Enums"]["fight_status"]
-          winner: Database["public"]["Enums"]["fight_winner"] | null
+          winner: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
+          participants: Json | null
+          status: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
+          created_at: string
+          settled_at: string | null
+          commission: number
         }
         Insert: {
-          commission_paid_out?: boolean
-          created_at?: string
           id?: number
-          participants: Json
-          status?: Database["public"]["Enums"]["fight_status"]
-          winner?: Database["public"]["Enums"]["fight_winner"] | null
+          winner?: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
+          participants?: Json | null
+          status?: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
+          created_at?: string
+          settled_at?: string | null
+          commission?: number
         }
         Update: {
-          commission_paid_out?: boolean
-          created_at?: string
           id?: number
-          participants?: Json
-          status?: Database["public"]["Enums"]["fight_status"]
-          winner?: Database["public"]["Enums"]["fight_winner"] | null
+          winner?: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
+          participants?: Json | null
+          status?: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
+          created_at?: string
+          settled_at?: string | null
+          commission?: number
         }
-        Relationships: []
       }
       messages: {
         Row: {
-          amount: number
-          created_at: string
           id: string
-          receiver_id: string
           sender_id: string
+          receiver_id: string
           text: string
+          created_at: string
         }
         Insert: {
-          amount?: number
-          created_at?: string
           id?: string
-          receiver_id: string
           sender_id: string
+          receiver_id: string
           text: string
+          created_at?: string
         }
         Update: {
-          amount?: number
-          created_at?: string
           id?: string
-          receiver_id?: string
           sender_id?: string
+          receiver_id?: string
           text?: string
+          created_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "messages_receiver_id_fkey"
-            columns: ["receiver_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "messages_sender_id_fkey"
-            columns: ["sender_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       profiles: {
         Row: {
-          agent_id: string | null
+          id: string
+          name: string
+          email: string
+          role: "PLAYER" | "AGENT" | "MASTER_AGENT" | "OPERATOR"
           coin_balance: number
           commission_balance: number
           commission_rate: number
-          email: string
-          id: string
-          master_agent_id: string | null
-          name: string
-          role: Database["public"]["Enums"]["user_role"]
           transfer_fee: number
+          agent_id: string | null
+          master_agent_id: string | null
         }
         Insert: {
-          agent_id?: string | null
+          id: string
+          name: string
+          email: string
+          role: "PLAYER" | "AGENT" | "MASTER_AGENT" | "OPERATOR"
           coin_balance?: number
           commission_balance?: number
           commission_rate?: number
-          email: string
-          id: string
-          master_agent_id?: string | null
-          name: string
-          role?: Database["public"]["Enums"]["user_role"]
           transfer_fee?: number
+          agent_id?: string | null
+          master_agent_id?: string | null
         }
         Update: {
-          agent_id?: string | null
+          id?: string
+          name?: string
+          email?: string
+          role?: "PLAYER" | "AGENT" | "MASTER_AGENT" | "OPERATOR"
           coin_balance?: number
           commission_balance?: number
           commission_rate?: number
-          email?: string
-          id?: string
-          master_agent_id?: string | null
-          name?: string
-          role?: Database["public"]["Enums"]["user_role"]
           transfer_fee?: number
+          agent_id?: string | null
+          master_agent_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "profiles_agent_id_fkey"
-            columns: ["agent_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "profiles_id_fkey"
-            columns: ["id"]
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "profiles_master_agent_id_fkey"
-            columns: ["master_agent_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       transactions: {
+          Row: {
+              id: string
+              type: 'MINT' | 'TRANSFER' | 'COMMISSION' | 'BET' | 'WINNING' | 'REFUND'
+              from_user_id: string | null
+              to_user_id: string | null
+              amount: number
+              transaction_timestamp: string
+          }
+          Insert: {
+              id?: string
+              type: 'MINT' | 'TRANSFER' | 'COMMISSION' | 'BET' | 'WINNING' | 'REFUND'
+              from_user_id?: string | null
+              to_user_id?: string | null
+              amount: number
+              transaction_timestamp?: string
+          }
+          Update: {
+              id?: string
+              type?: 'MINT' | 'TRANSFER' | 'COMMISSION' | 'BET' | 'WINNING' | 'REFUND'
+              from_user_id?: string | null
+              to_user_id?: string | null
+              amount?: number
+              transaction_timestamp?: string
+          }
+      }
+      upcoming_fights: {
         Row: {
-          amount: number
-          from_user_id: string | null
-          id: string
-          to_user_id: string
-          transaction_timestamp: string
-          type: Database["public"]["Enums"]["transaction_type"]
+          id: number
+          participants: Json
+          created_at: string
         }
         Insert: {
-          amount: number
-          from_user_id?: string | null
-          id?: string
-          to_user_id: string
-          transaction_timestamp?: string
-          type: Database["public"]["Enums"]["transaction_type"]
+          id?: number
+          participants: Json
+          created_at?: string
         }
         Update: {
-          amount?: number
-          from_user_id?: string | null
-          id?: string
-          to_user_id?: string
-          transaction_timestamp?: string
-          type?: Database["public"]["Enums"]["transaction_type"]
+          id?: number
+          participants?: Json
+          created_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "transactions_from_user_id_fkey"
-            columns: ["from_user_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "transactions_to_user_id_fkey"
-            columns: ["to_user_id"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      // FIX: Added type definition for the create_agent_user RPC to resolve typing errors in App.tsx.
       create_agent_user: {
         Args: {
           p_name: string
@@ -267,22 +208,9 @@ export interface Database {
         }
         Returns: string
       }
-      get_registerable_agents: {
-        Args: Record<PropertyKey, never>
-        Returns: {
-          id: string
-          name: string
-        }[]
-      }
-      // Other functions from the setup script would go here...
     }
     Enums: {
-      bet_choice: "RED" | "WHITE"
-      fight_status: "UPCOMING" | "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
-      fight_winner: "RED" | "WHITE" | "DRAW" | "CANCELLED"
-      request_status: "PENDING" | "APPROVED" | "DECLINED"
-      transaction_type: "MINT" | "TRANSFER" | "COMMISSION" | "BET_WIN" | "BET_PLACE" | "BET_REFUND"
-      user_role: "OPERATOR" | "MASTER_AGENT" | "AGENT" | "PLAYER"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never

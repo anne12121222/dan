@@ -1,45 +1,86 @@
-import React, { useState, useMemo } from 'react';
-import { Player, FightStatus, PlayerViewProps, UserRole } from '../types.ts';
+import React, { useState } from 'react';
+import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice } from '../types.ts';
 import LiveFeed from './LiveFeed.tsx';
-import BettingControls from './BettingControls.tsx';
 import BettingPools from './BettingPools.tsx';
-import FightHistory from './FightHistory.tsx';
+import BettingControls from './BettingControls.tsx';
 import Trends from './Trends.tsx';
-import Card from './common/Card.tsx';
-import RequestCoinsModal from './RequestCoinsModal.tsx'; // Use the simple modal
-import LiveBetCounts from './LiveBetCounts.tsx';
+import FightHistory from './FightHistory.tsx';
+import RequestCoinsModal from './RequestCoinsModal.tsx';
+import UpcomingFightsDrawer from './UpcomingFightsDrawer.tsx';
+import NotificationComponent from './Notification.tsx';
+
+interface PlayerViewProps {
+  currentUser: Player;
+  fightStatus: FightStatus;
+  lastWinner: FightWinner | null;
+  fightId: number | null;
+  timer: number;
+  bettingPools: { meron: number; wala: number; };
+  currentBet: Bet | null;
+  onPlaceBet: (amount: number, choice: BetChoice) => Promise<string | null>;
+  fightHistory: PlayerFightHistoryEntry[];
+  upcomingFights: UpcomingFight[];
+  onRequestCoins: (amount: number) => Promise<string | null>;
+  isDrawerOpen: boolean;
+  onToggleDrawer: () => void;
+}
 
 const PlayerView: React.FC<PlayerViewProps> = ({
   currentUser,
   fightStatus,
+  lastWinner,
   fightId,
   timer,
-  currentBet,
   bettingPools,
-  playerFightHistory,
-  fightHistory,
-  allUsers,
+  currentBet,
   onPlaceBet,
-  onCreateCoinRequest,
-  betCounts
+  fightHistory,
+  upcomingFights,
+  onRequestCoins,
+  isDrawerOpen,
+  onToggleDrawer
 }) => {
-  const [isRequestModalOpen, setRequestModalOpen] = useState(false);
+    const [isRequestingCoins, setIsRequestingCoins] = useState(false);
+    const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  const agent = useMemo(() => {
-    if (currentUser.agentId && allUsers[currentUser.agentId]) {
-      return allUsers[currentUser.agentId];
-    }
-    return null;
-  }, [currentUser.agentId, allUsers]);
-  
+
+    const handleRequestSubmit = async (amount: number) => {
+        const error = await onRequestCoins(amount);
+        if (error) {
+            return error;
+        }
+        setNotification({ message: 'Coin request sent successfully!', type: 'success' });
+        return null;
+    };
+
   return (
-    <>
+    <div className="min-h-screen bg-zinc-900 text-white p-4 lg:p-8">
+      <UpcomingFightsDrawer isOpen={isDrawerOpen} onClose={onToggleDrawer} fights={upcomingFights} />
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          <LiveFeed fightStatus={fightStatus} lastWinner={fightHistory[0]?.winner || null} fightId={fightId} timer={timer} />
-          {fightId !== null && fightStatus !== FightStatus.SETTLED && <LiveBetCounts counts={betCounts} />}
+        {/* Main Content: Left/Center Column */}
+        <div className="lg:col-span-2 space-y-4">
+          <LiveFeed
+            fightStatus={fightStatus}
+            lastWinner={lastWinner}
+            fightId={fightId}
+            timer={timer}
+          />
           <BettingPools pools={bettingPools} />
+          <Trends fightHistory={fightHistory} />
+        </div>
+
+        {/* Sidebar: Right Column */}
+        <div className="space-y-4">
+            <div className="bg-zinc-800/50 p-4 rounded-md">
+                <h2 className="text-lg font-semibold text-gray-300">Your Wallet</h2>
+                <p className="text-3xl font-bold text-yellow-400 my-2">{currentUser.coinBalance.toLocaleString()}</p>
+                <button
+                    onClick={() => setIsRequestingCoins(true)}
+                    className="w-full p-2 bg-yellow-600 hover:bg-yellow-700 text-white font-bold rounded-lg transition"
+                >
+                    Request Coins from Agent
+                </button>
+            </div>
           <BettingControls
             status={fightStatus}
             balance={currentUser.coinBalance}
@@ -47,40 +88,23 @@ const PlayerView: React.FC<PlayerViewProps> = ({
             onPlaceBet={onPlaceBet}
             currentBet={currentBet}
           />
-        </div>
-        {/* Sidebar */}
-        <div className="space-y-6">
-            <Card>
-                <div className="p-4">
-                    <h3 className="text-lg font-semibold text-gray-200">My Agent</h3>
-                    {agent ? (
-                        <div className="mt-2 text-sm">
-                            <p className="font-semibold text-green-400">{agent.name}</p>
-                            <p className="text-gray-400">{agent.email}</p>
-                        </div>
-                    ) : (
-                        <p className="text-gray-500 mt-2 text-sm">You are not assigned to an agent.</p>
-                    )}
-                    <button 
-                      onClick={() => setRequestModalOpen(true)}
-                      disabled={!agent}
-                      className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-red-800/50 disabled:cursor-not-allowed"
-                    >
-                      {agent ? 'Request Coins' : 'Assign an Agent to Request Coins'}
-                    </button>
-                </div>
-            </Card>
-          <Trends fightHistory={fightHistory} />
-          <FightHistory fightHistory={playerFightHistory} />
+          <FightHistory fightHistory={fightHistory} />
         </div>
       </div>
-       {isRequestModalOpen && (
-          <RequestCoinsModal 
-            onClose={() => setRequestModalOpen(false)}
-            onSubmit={onCreateCoinRequest}
+      {isRequestingCoins && (
+          <RequestCoinsModal
+            onClose={() => setIsRequestingCoins(false)}
+            onSubmit={handleRequestSubmit}
           />
       )}
-    </>
+      {notification && (
+        <NotificationComponent
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
+    </div>
   );
 };
 
