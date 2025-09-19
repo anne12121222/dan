@@ -205,13 +205,13 @@ export interface Database {
           p_white_text: string
         }
         Returns: number
-      }
+      },
       close_betting: {
         Args: {
           p_fight_id: number
         }
         Returns: undefined
-      }
+      },
       create_agent_user: {
         Args: {
           p_name: string
@@ -219,7 +219,7 @@ export interface Database {
           p_password: string
         }
         Returns: string
-      }
+      },
       // FIX: Add missing function definition for creating a master agent user.
       create_master_agent_user: {
         Args: {
@@ -228,7 +228,7 @@ export interface Database {
           p_password: string
         }
         Returns: string
-      }
+      },
       // FIX: Add missing function definition for creating an operator user.
       create_operator_user: {
         Args: {
@@ -237,21 +237,21 @@ export interface Database {
           p_password: string
         }
         Returns: string
-      }
+      },
       create_coin_request: {
         Args: {
           p_to_user_id: string
           p_amount: number
         }
         Returns: undefined
-      }
+      },
       declare_winner: {
         Args: {
           p_fight_id: number
           p_winner_text: "RED" | "WHITE" | "DRAW" | "CANCELLED"
         }
         Returns: undefined
-      }
+      },
       get_messages: {
         Args: {
           p_contact_id: string
@@ -263,7 +263,7 @@ export interface Database {
             text: string
             created_at: string
         }[]
-      }
+      },
       place_bet: {
         Args: {
           p_fight_id: number
@@ -271,14 +271,14 @@ export interface Database {
           p_choice: "RED" | "WHITE"
         }
         Returns: string
-      }
+      },
       respond_to_coin_request: {
         Args: {
           p_request_id: string
           p_response: "APPROVED" | "DECLINED"
         }
         Returns: string
-      }
+      },
       // FIX: Add missing function definition for sending a message and coins.
       send_message_and_coins: {
         Args: {
@@ -287,7 +287,7 @@ export interface Database {
           p_amount: number
         }
         Returns: string
-      }
+      },
       start_next_fight: {
         Args: {}
         Returns: undefined

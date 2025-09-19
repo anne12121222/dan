@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -208,16 +207,18 @@ const App: React.FC = () => {
     }, [currentUser, supabase]);
 
 
-    // Main data fetching function for fight data
-    const fetchActiveFight = React.useCallback(async () => {
+    // DEFINITIVE FIX: Split the monolithic fetch function into smaller, more targeted functions to avoid race conditions.
+    const fetchFightQueue = React.useCallback(async () => {
         if (!supabase) return;
-        
-        // Fetch upcoming fights
         const { data: upcomingData } = await supabase.from('upcoming_fights').select('*').order('id', { ascending: true });
         if (upcomingData) {
             const upcoming = upcomingData as UpcomingFightRow[];
             setUpcomingFights(upcoming.map(f => ({ id: f.id, participants: f.participants as any })));
         }
+    }, [supabase]);
+
+    const fetchCoreFightData = React.useCallback(async () => {
+        if (!supabase) return;
 
         // Fetch completed fights for trends/history
         const { data: completedData } = await supabase.from('fights').select('id, winner, commission').eq('status', 'SETTLED').order('settled_at', { ascending: false }).limit(20);
@@ -239,7 +240,6 @@ const App: React.FC = () => {
                 return { ...f, bet: bet ? { id: bet.id, userId: bet.user_id, fightId: bet.fight_id, amount: bet.amount, choice: bet.choice } : null, outcome };
             }) || []);
         }
-
 
         // Fetch the currently active fight
         const { data: fightData } = await supabase.from('fights').select('*').in('status', ['BETTING_OPEN', 'BETTING_CLOSED']).order('id', { ascending: false }).limit(1).single();
@@ -273,14 +273,14 @@ const App: React.FC = () => {
     }, [currentUser, supabase]);
 
 
-  // DEFINITIVE REAL-TIME FIX: Consolidate all subscriptions into a single, robust useEffect hook.
-  // This prevents race conditions and ensures all real-time updates are handled reliably.
+  // DEFINITIVE REAL-TIME FIX: Use the refactored, more granular fetch functions in the subscriptions.
   useEffect(() => {
     if (!supabase || !currentUser) return;
 
     // Initial data fetch on login
     fetchAllData();
-    fetchActiveFight();
+    fetchFightQueue();
+    fetchCoreFightData();
 
     // A single channel for all real-time subscriptions
     const mainChannel = supabase.channel(`app-channel-${currentUser.id}`)
@@ -296,15 +296,15 @@ const App: React.FC = () => {
          if (updatedUser) setCurrentUser(updatedUser);
       })
       // Public listeners for fights, bets, and the upcoming queue
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchActiveFight)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bets' }, fetchActiveFight)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, fetchActiveFight)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fights' }, fetchCoreFightData)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bets' }, fetchCoreFightData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'upcoming_fights' }, fetchFightQueue)
       .subscribe();
 
     return () => {
         supabase.removeChannel(mainChannel);
     };
-  }, [currentUser, supabase, fetchAllData, fetchActiveFight]);
+  }, [currentUser, supabase, fetchAllData, fetchFightQueue, fetchCoreFightData]);
 
   // Effect for client-side timer
   useEffect(() => {
