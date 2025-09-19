@@ -1,53 +1,45 @@
 -- =================================================================================================
--- Reality Boxing - Betting Platform Schema & Access-Control Logic
--- =================================================================================================
--- To run this script:
--- 1. Navigate to the SQL Editor in your Supabase project dashboard.
--- 2. Create a new query.
--- 3. Copy the entire content of this file.
--- 4. Paste it into the query editor.
--- 5. Click "Run".
---
--- This script is idempotent, meaning it can be run multiple times safely.
--- It will clean up the old schema before setting up the new one.
--- =================================================================================================
-
-
--- =================================================================================================
 -- 0. INITIAL CLEANUP
+-- Drops all existing objects to ensure a clean slate for recreation.
 -- =================================================================================================
--- Drop existing policies, triggers, functions, tables, and types in a safe order to avoid dependency errors.
 
--- Disable Row Level Security on all tables to allow dropping policies
+-- Drop existing policies and disable RLS
 DO $$
 DECLARE
     table_record RECORD;
+    policy_record RECORD;
 BEGIN
     FOR table_record IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
         EXECUTE 'ALTER TABLE public.' || quote_ident(table_record.tablename) || ' DISABLE ROW LEVEL SECURITY;';
+        -- Drop all policies for the table
+        FOR policy_record IN (SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = table_record.tablename) LOOP
+            EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_record.policyname) || ' ON public.' || quote_ident(table_record.tablename) || ';';
+        END LOOP;
     END LOOP;
 END $$;
 
--- Drop all existing policies
-DO $$
-DECLARE
-    policy_record RECORD;
-BEGIN
-    FOR policy_record IN (SELECT policyname, tablename FROM pg_policies WHERE schemaname = 'public') LOOP
-        EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(policy_record.policyname) || ' ON public.' || quote_ident(policy_record.tablename) || ';';
-    END LOOP;
-END $$;
-
--- Drop the user creation trigger from auth.users
+-- Drop trigger on auth.users table
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
--- Drop all functions
+-- Drop tables with CASCADE to remove dependent objects
+DROP TABLE IF EXISTS public.bets CASCADE;
+DROP TABLE IF EXISTS public.transactions CASCADE;
+DROP TABLE IF EXISTS public.coin_requests CASCADE;
+DROP TABLE IF EXISTS public.messages CASCADE;
+DROP TABLE IF EXISTS public.upcoming_fights CASCADE;
+DROP TABLE IF EXISTS public.fights CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
+-- Drop functions
 DROP FUNCTION IF EXISTS public.handle_new_user();
-DROP FUNCTION IF EXISTS public.handle_new_player(text, text, text, uuid);
+DROP FUNCTION IF EXISTS public.get_user_role(uuid);
+DROP FUNCTION IF EXISTS public.handle_new_player(text, text, text, text);
 DROP FUNCTION IF EXISTS public.create_user_by_master_agent(text, text, text, public.user_role, uuid);
 DROP FUNCTION IF EXISTS public.start_next_fight();
 DROP FUNCTION IF EXISTS public.close_betting(bigint);
 DROP FUNCTION IF EXISTS public.declare_winner(bigint, public.fight_winner);
+DROP FUNCTION IF EXISTS public.place_bet(uuid, bigint, numeric, public.bet_choice);
+DROP FUNCTION IF EXISTS public.create_coin_request(uuid, numeric);
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, text);
 DROP FUNCTION IF EXISTS public.send_message(uuid, text, numeric);
 DROP FUNCTION IF EXISTS public.get_player_fight_history(uuid);
@@ -55,16 +47,7 @@ DROP FUNCTION IF EXISTS public.get_user_transactions(uuid);
 DROP FUNCTION IF EXISTS public.get_agent_requests_for_master(uuid);
 DROP FUNCTION IF EXISTS public.get_messages(uuid, uuid);
 
--- Drop all tables
-DROP TABLE IF EXISTS public.bets CASCADE;
-DROP TABLE IF EXISTS public.transactions CASCADE;
-DROP TABLE IF EXISTS public.messages CASCADE;
-DROP TABLE IF EXISTS public.coin_requests CASCADE;
-DROP TABLE IF EXISTS public.fights CASCADE;
-DROP TABLE IF EXISTS public.upcoming_fights CASCADE;
-DROP TABLE IF EXISTS public.profiles CASCADE;
-
--- Drop all custom types (enums)
+-- Drop types with CASCADE
 DROP TYPE IF EXISTS public.user_role CASCADE;
 DROP TYPE IF EXISTS public.fight_status CASCADE;
 DROP TYPE IF EXISTS public.bet_choice CASCADE;
@@ -74,8 +57,10 @@ DROP TYPE IF EXISTS public.request_status CASCADE;
 
 
 -- =================================================================================================
--- 1. ENUMERATIONS (CUSTOM DATA TYPES)
+-- 1. TYPE DEFINITIONS
+-- Defines custom data types (enums) used throughout the schema.
 -- =================================================================================================
+
 CREATE TYPE public.user_role AS ENUM ('PLAYER', 'AGENT', 'MASTER_AGENT', 'OPERATOR');
 CREATE TYPE public.fight_status AS ENUM ('BETTING_OPEN', 'BETTING_CLOSED', 'SETTLED');
 CREATE TYPE public.bet_choice AS ENUM ('RED', 'WHITE');
@@ -84,56 +69,54 @@ CREATE TYPE public.transaction_type AS ENUM ('MINT', 'TRANSFER', 'COMMISSION', '
 CREATE TYPE public.request_status AS ENUM ('PENDING', 'APPROVED', 'DECLINED');
 
 -- =================================================================================================
--- 2. TABLES
+-- 2. TABLE CREATION
+-- Defines the structure of all database tables.
 -- =================================================================================================
 
--- Profiles Table: Stores public user data and application-specific info.
+-- Profiles table to store user-specific data, extending the auth.users table.
 CREATE TABLE public.profiles (
     id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     name text NOT NULL,
     email text NOT NULL UNIQUE,
-    role public.user_role NOT NULL DEFAULT 'PLAYER',
-    coin_balance numeric(15, 2) NOT NULL DEFAULT 1000.00,
+    role public.user_role NOT NULL,
+    coin_balance numeric(15, 2) NOT NULL DEFAULT 0.00,
     commission_balance numeric(15, 2) NOT NULL DEFAULT 0.00,
     agent_id uuid REFERENCES public.profiles(id),
     master_agent_id uuid REFERENCES public.profiles(id),
-    commission_rate numeric(4, 2) NOT NULL DEFAULT 0.07,
-    transfer_fee numeric(4, 2) NOT NULL DEFAULT 0.01
+    commission_rate numeric(4, 3) NOT NULL DEFAULT 0.070,
+    transfer_fee numeric(4, 3) NOT NULL DEFAULT 0.010
 );
-COMMENT ON TABLE public.profiles IS 'Stores all user profile data.';
 
--- Fights Table: Stores the state of current and past fights.
+-- Fights table stores the state of each fight event.
 CREATE TABLE public.fights (
     id bigserial PRIMARY KEY,
-    status public.fight_status NOT NULL DEFAULT 'BETTING_OPEN',
+    status public.fight_status NOT NULL DEFAULT 'SETTLED',
     winner public.fight_winner,
-    betting_ends_at timestamptz,
     commission numeric(15, 2),
+    betting_ends_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.fights IS 'Represents the state of each fight.';
 
--- Upcoming Fights Table: A queue for fights scheduled by the operator.
+-- Upcoming Fights queue.
 CREATE TABLE public.upcoming_fights (
     id bigserial PRIMARY KEY,
     red_participant text NOT NULL,
     white_participant text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.upcoming_fights IS 'Queue for upcoming fights.';
 
--- Bets Table: Stores all bets placed by players on fights.
+-- Bets table to record all player wagers.
 CREATE TABLE public.bets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES public.profiles(id),
     fight_id bigint NOT NULL REFERENCES public.fights(id),
     amount numeric(15, 2) NOT NULL CHECK (amount > 0),
     choice public.bet_choice NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(user_id, fight_id) -- A user can only bet once per fight.
 );
-COMMENT ON TABLE public.bets IS 'Stores player bets on fights.';
 
--- Transactions Table: A ledger of all coin movements.
+-- Transactions table for a complete ledger of all coin movements.
 CREATE TABLE public.transactions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     type public.transaction_type NOT NULL,
@@ -142,9 +125,8 @@ CREATE TABLE public.transactions (
     amount numeric(15, 2) NOT NULL,
     transaction_timestamp timestamptz NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.transactions IS 'Ledger of all coin movements.';
 
--- Coin Requests Table: Manages coin requests between users.
+-- Coin requests between users.
 CREATE TABLE public.coin_requests (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     from_user_id uuid NOT NULL REFERENCES public.profiles(id),
@@ -153,9 +135,8 @@ CREATE TABLE public.coin_requests (
     status public.request_status NOT NULL DEFAULT 'PENDING',
     created_at timestamptz NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.coin_requests IS 'Manages coin requests between users.';
 
--- Messages Table: Stores chat messages between users.
+-- Messages for the chat system.
 CREATE TABLE public.messages (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     sender_id uuid NOT NULL REFERENCES public.profiles(id),
@@ -163,57 +144,34 @@ CREATE TABLE public.messages (
     text text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.messages IS 'Stores chat messages between users.';
 
 -- =================================================================================================
--- 3. TRIGGERS & FUNCTIONS
+-- 3. DATABASE FUNCTIONS (RPC)
+-- Core business logic encapsulated in server-side functions.
 -- =================================================================================================
 
--- Function to create a profile for a new user.
+-- Trigger function to create a profile when a new user signs up in auth.users.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger AS $$
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-    INSERT INTO public.profiles (id, name, email, role, agent_id)
-    VALUES (
-        new.id,
-        COALESCE(new.raw_user_meta_data->>'name', new.email), -- Use email as name if not provided
-        new.email,
-        COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'::public.user_role), -- Default role to PLAYER if not provided
-        (new.raw_user_meta_data->>'agent_id')::uuid
-    );
-    RETURN new;
+  INSERT INTO public.profiles (id, name, email, role, agent_id, coin_balance)
+  VALUES (
+    new.id,
+    COALESCE(new.raw_user_meta_data->>'name', new.email), -- Use name from metadata, fallback to email
+    new.email,
+    COALESCE((new.raw_user_meta_data->>'role')::public.user_role, 'PLAYER'), -- Use role from metadata, fallback to PLAYER
+    (new.raw_user_meta_data->>'agent_id')::uuid,
+    100 -- Starting balance for new players
+  );
+  RETURN new;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-COMMENT ON FUNCTION public.handle_new_user IS 'Creates a profile when a new user signs up in auth.users.';
+$$;
 
--- Trigger to call handle_new_user on new user creation.
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- =================================================================================================
--- 4. RPC FUNCTIONS (for client-side calls)
--- =================================================================================================
-
--- Function for new player registration
-CREATE OR REPLACE FUNCTION public.handle_new_player(name text, email text, password text, agent_id uuid)
-RETURNS text AS $$
-DECLARE
-    new_user_id uuid;
-BEGIN
-    -- Create the user in the auth schema
-    new_user_id := auth.admin_create_user(email, password, jsonb_build_object(
-        'name', name,
-        'role', 'PLAYER',
-        'agent_id', agent_id
-    ));
-    RETURN 'Player account created successfully.';
-EXCEPTION WHEN OTHERS THEN
-    RETURN 'Error: Could not create player. ' || SQLERRM;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function for Master Agent to create other users
+-- Function for Master Agents to create any other user type.
 CREATE OR REPLACE FUNCTION public.create_user_by_master_agent(
     name text,
     email text,
@@ -221,95 +179,136 @@ CREATE OR REPLACE FUNCTION public.create_user_by_master_agent(
     role public.user_role,
     master_agent_id uuid
 )
-RETURNS text AS $$
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
 DECLARE
     new_user_id uuid;
-    creating_user_role public.user_role;
 BEGIN
-    -- Ensure the user calling this function is a Master Agent
-    SELECT p.role INTO creating_user_role FROM public.profiles p WHERE p.id = auth.uid();
-    IF creating_user_role IS NULL OR creating_user_role != 'MASTER_AGENT' THEN
-        RETURN 'Error: Permission denied. Only Master Agents can create users.';
+    -- Check if the calling user is a Master Agent
+    IF (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid()) != 'MASTER_AGENT' THEN
+        RAISE EXCEPTION 'Permission denied: Only Master Agents can create users.';
     END IF;
 
-    -- Create the user in the auth schema
-    new_user_id := auth.admin_create_user(email, password, jsonb_build_object(
-        'name', name,
-        'role', role
-    ));
+    -- Create the user in the authentication system
+    new_user_id := (auth.admin_create_user(jsonb_build_object(
+        'email', email,
+        'password', password,
+        'email_confirm', true,
+        'user_metadata', jsonb_build_object(
+            'name', name,
+            'role', role,
+            'master_agent_id', master_agent_id
+        )
+    )))->>'id';
 
-    -- If creating an Agent, assign the master_agent_id
+    -- The handle_new_user trigger will create the profile.
+    -- We just need to set the master_agent_id for Agents.
     IF role = 'AGENT' THEN
-        UPDATE public.profiles SET master_agent_id = master_agent_id WHERE id = new_user_id;
+        UPDATE public.profiles SET master_agent_id = create_user_by_master_agent.master_agent_id WHERE id = new_user_id;
     END IF;
-    
-    RETURN role || ' account created successfully.';
-EXCEPTION WHEN OTHERS THEN
-    RETURN 'Error: Could not create user. ' || SQLERRM;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function for Operator to start the next fight
+    RETURN new_user_id;
+END;
+$$;
+
+
+-- Function for player self-registration.
+CREATE OR REPLACE FUNCTION public.handle_new_player(
+    name text,
+    email text,
+    password text,
+    agent_id text
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    new_user_id uuid;
+BEGIN
+    new_user_id := (auth.admin_create_user(jsonb_build_object(
+        'email', email,
+        'password', password,
+        'email_confirm', true,
+        'user_metadata', jsonb_build_object(
+            'name', name,
+            'role', 'PLAYER',
+            'agent_id', agent_id
+        )
+    )))->>'id';
+    RETURN new_user_id;
+END;
+$$;
+
+
+-- Operator function to start the next fight from the queue.
 CREATE OR REPLACE FUNCTION public.start_next_fight()
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
 DECLARE
     next_fight record;
+    new_fight_id bigint;
 BEGIN
-    -- Check if the caller is an Operator
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-        RAISE EXCEPTION 'Only operators can start a fight.';
-    END IF;
-
-    -- Get the next fight from the queue
+    -- Find the next fight in the queue
     SELECT * INTO next_fight FROM public.upcoming_fights ORDER BY id ASC LIMIT 1;
-    IF next_fight IS NULL THEN
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'No upcoming fights in the queue.';
     END IF;
 
-    -- Create a new active fight
+    -- Create a new fight record
     INSERT INTO public.fights (status, betting_ends_at)
-    VALUES ('BETTING_OPEN', now() + interval '60 seconds');
+    VALUES ('BETTING_OPEN', now() + interval '60 seconds')
+    RETURNING id INTO new_fight_id;
 
     -- Remove the fight from the queue
     DELETE FROM public.upcoming_fights WHERE id = next_fight.id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Function for Operator to close betting
+-- Operator function to close betting for a fight.
 CREATE OR REPLACE FUNCTION public.close_betting(p_fight_id bigint)
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
 BEGIN
-    -- Check if the caller is an Operator
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-        RAISE EXCEPTION 'Only operators can close betting.';
-    END IF;
-
     UPDATE public.fights
     SET status = 'BETTING_CLOSED'
     WHERE id = p_fight_id AND status = 'BETTING_OPEN';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Function for Operator to declare a winner and settle bets
+-- Operator function to declare the winner and distribute winnings.
 CREATE OR REPLACE FUNCTION public.declare_winner(p_fight_id bigint, p_winner public.fight_winner)
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
-    fight_commission_rate numeric := 0.10; -- 10% commission
     total_pool numeric;
     winner_pool numeric;
     loser_pool numeric;
     total_commission numeric;
+    player_share numeric;
+    payout_amount numeric;
     winning_bet record;
+    losing_bet record;
+    fight_commission_rate numeric := 0.05; -- 5% commission
 BEGIN
-    -- Check if the caller is an Operator
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'OPERATOR' THEN
-        RAISE EXCEPTION 'Only operators can declare winners.';
-    END IF;
+    -- Set fight status to SETTLED
+    UPDATE public.fights SET winner = p_winner, status = 'SETTLED' WHERE id = p_fight_id;
 
-    -- Update fight status
-    UPDATE public.fights SET status = 'SETTLED', winner = p_winner WHERE id = p_fight_id;
-
-    -- Handle DRAW or CANCELLED - Refund all bets
+    -- Calculate pools
+    SELECT COALESCE(SUM(amount), 0) INTO total_pool FROM public.bets WHERE fight_id = p_fight_id;
+    
+    -- If DRAW or CANCELLED, refund all bets
     IF p_winner IN ('DRAW', 'CANCELLED') THEN
         FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id LOOP
             UPDATE public.profiles SET coin_balance = coin_balance + winning_bet.amount WHERE id = winning_bet.user_id;
@@ -318,202 +317,223 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Handle RED or WHITE wins
-    -- Calculate pools and commission
-    SELECT COALESCE(SUM(amount), 0) INTO winner_pool FROM public.bets WHERE fight_id = p_fight_id AND choice::text = p_winner::text;
-    SELECT COALESCE(SUM(amount), 0) INTO loser_pool FROM public.bets WHERE fight_id = p_fight_id AND choice::text != p_winner::text;
-    total_pool := winner_pool + loser_pool;
+    -- Calculate pools for WIN/LOSS scenario
+    SELECT COALESCE(SUM(amount), 0) INTO winner_pool FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::bet_choice;
+    SELECT COALESCE(SUM(amount), 0) INTO loser_pool FROM public.bets WHERE fight_id = p_fight_id AND choice != p_winner::bet_choice;
+    
     total_commission := loser_pool * fight_commission_rate;
+    UPDATE public.fights SET commission = total_commission WHERE id = p_fight_id;
 
-    -- Record commission transaction for the operator
-    INSERT INTO public.transactions(type, to_user_id, amount) VALUES ('COMMISSION', auth.uid(), total_commission);
-
-    -- Payout to winners
+    -- Pay out to winners
     IF winner_pool > 0 THEN
-        FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice::text = p_winner::text LOOP
-            DECLARE
-                payout_amount numeric;
-                player_share numeric;
-            BEGIN
-                player_share := winning_bet.amount / winner_pool;
-                payout_amount := winning_bet.amount + (player_share * (loser_pool - total_commission));
-                UPDATE public.profiles SET coin_balance = coin_balance + payout_amount WHERE id = winning_bet.user_id;
-                INSERT INTO public.transactions (type, to_user_id, amount) VALUES ('WINNING', winning_bet.user_id, payout_amount);
-            END;
+        FOR winning_bet IN SELECT * FROM public.bets WHERE fight_id = p_fight_id AND choice = p_winner::bet_choice LOOP
+            player_share := winning_bet.amount / winner_pool;
+            payout_amount := winning_bet.amount + (player_share * (loser_pool - total_commission));
+            UPDATE public.profiles SET coin_balance = coin_balance + payout_amount WHERE id = winning_bet.user_id;
+            INSERT INTO public.transactions (type, to_user_id, amount) VALUES ('WINNING', winning_bet.user_id, payout_amount);
         END LOOP;
     END IF;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Function to respond to a coin request
-CREATE OR REPLACE FUNCTION public.respond_to_coin_request(p_request_id uuid, p_response text)
-RETURNS void AS $$
-DECLARE
-    request record;
-BEGIN
-    SELECT * INTO request FROM public.coin_requests WHERE id = p_request_id;
     
-    -- Security check: only the recipient can respond
-    IF request.to_user_id != auth.uid() THEN
-        RAISE EXCEPTION 'Permission denied.';
-    END IF;
+    -- Handle commission distribution
+    FOR losing_bet IN SELECT b.*, p.agent_id, p.master_agent_id FROM public.bets b JOIN public.profiles p ON b.user_id = p.id WHERE b.fight_id = p_fight_id AND b.choice != p_winner::bet_choice LOOP
+        DECLARE
+            agent_comm numeric;
+            master_comm numeric;
+        BEGIN
+            IF losing_bet.agent_id IS NOT NULL THEN
+                agent_comm := losing_bet.amount * 0.03; -- 3% to agent
+                UPDATE public.profiles SET commission_balance = commission_balance + agent_comm WHERE id = losing_bet.agent_id;
+                INSERT INTO public.transactions(type, from_user_id, to_user_id, amount) VALUES('COMMISSION', losing_bet.user_id, losing_bet.agent_id, agent_comm);
 
-    IF request.status != 'PENDING' THEN
-        RAISE EXCEPTION 'Request has already been handled.';
-    END IF;
+                IF losing_bet.master_agent_id IS NOT NULL THEN
+                    master_comm := losing_bet.amount * 0.02; -- 2% to master agent
+                    UPDATE public.profiles SET commission_balance = commission_balance + master_comm WHERE id = losing_bet.master_agent_id;
+                    INSERT INTO public.transactions(type, from_user_id, to_user_id, amount) VALUES('COMMISSION', losing_bet.user_id, losing_bet.master_agent_id, master_comm);
+                END IF;
+            END IF;
+        END;
+    END LOOP;
+END;
+$$;
+
+
+-- Function to respond to a coin request.
+CREATE OR REPLACE FUNCTION public.respond_to_coin_request(p_request_id uuid, p_response text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    req record;
+    sender_profile record;
+    receiver_profile record;
+BEGIN
+    SELECT * INTO req FROM public.coin_requests WHERE id = p_request_id AND status = 'PENDING';
+    IF NOT FOUND THEN RAISE EXCEPTION 'Request not found or already handled.'; END IF;
+
+    -- Ensure the user responding is the intended recipient
+    IF req.to_user_id != auth.uid() THEN RAISE EXCEPTION 'Permission denied.'; END IF;
+
+    UPDATE public.coin_requests SET status = p_response::public.request_status WHERE id = p_request_id;
 
     IF p_response = 'APPROVED' THEN
-        -- Check if approver has enough balance
-        IF (SELECT coin_balance FROM public.profiles WHERE id = request.to_user_id) < request.amount THEN
-            RAISE EXCEPTION 'Insufficient balance to approve request.';
-        END IF;
+        SELECT * INTO sender_profile FROM public.profiles WHERE id = req.from_user_id;
+        SELECT * INTO receiver_profile FROM public.profiles WHERE id = req.to_user_id;
 
+        IF receiver_profile.coin_balance < req.amount THEN RAISE EXCEPTION 'Insufficient funds.'; END IF;
+        
         -- Perform the transfer
-        UPDATE public.profiles SET coin_balance = coin_balance - request.amount WHERE id = request.to_user_id;
-        UPDATE public.profiles SET coin_balance = coin_balance + request.amount WHERE id = request.from_user_id;
+        UPDATE public.profiles SET coin_balance = coin_balance - req.amount WHERE id = req.to_user_id;
+        UPDATE public.profiles SET coin_balance = coin_balance + req.amount WHERE id = req.from_user_id;
+        INSERT INTO public.transactions (type, from_user_id, to_user_id, amount) VALUES ('TRANSFER', req.to_user_id, req.from_user_id, req.amount);
 
-        -- Record transaction
-        INSERT INTO public.transactions (type, from_user_id, to_user_id, amount)
-        VALUES ('TRANSFER', request.to_user_id, request.from_user_id, request.amount);
-
-        -- Update request status
-        UPDATE public.coin_requests SET status = 'APPROVED' WHERE id = p_request_id;
-
-    ELSIF p_response = 'DECLINED' THEN
-        UPDATE public.coin_requests SET status = 'DECLINED' WHERE id = p_request_id;
-    ELSE
-        RAISE EXCEPTION 'Invalid response.';
+        -- Adoption logic
+        IF sender_profile.role = 'PLAYER' AND sender_profile.agent_id IS NULL AND receiver_profile.role = 'AGENT' THEN
+            UPDATE public.profiles SET agent_id = req.to_user_id, master_agent_id = receiver_profile.master_agent_id WHERE id = req.from_user_id;
+        ELSIF sender_profile.role = 'AGENT' AND sender_profile.master_agent_id IS NULL AND receiver_profile.role = 'MASTER_AGENT' THEN
+            UPDATE public.profiles SET master_agent_id = req.to_user_id WHERE id = req.from_user_id;
+        END IF;
     END IF;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Function to send a message and optionally coins
+-- Function to send a message and optionally coins.
 CREATE OR REPLACE FUNCTION public.send_message(p_receiver_id uuid, p_text text, p_coin_amount numeric)
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
     sender_id uuid := auth.uid();
 BEGIN
-    -- Insert the message
-    INSERT INTO public.messages(sender_id, receiver_id, text) VALUES (sender_id, p_receiver_id, p_text);
-
-    -- Handle coin transfer
+    INSERT INTO public.messages (sender_id, receiver_id, text) VALUES (sender_id, p_receiver_id, p_text);
     IF p_coin_amount > 0 THEN
-        IF (SELECT coin_balance FROM public.profiles WHERE id = sender_id) < p_coin_amount THEN
-            RAISE EXCEPTION 'Insufficient balance to send coins.';
-        END IF;
-        
         UPDATE public.profiles SET coin_balance = coin_balance - p_coin_amount WHERE id = sender_id;
         UPDATE public.profiles SET coin_balance = coin_balance + p_coin_amount WHERE id = p_receiver_id;
-        
-        INSERT INTO public.transactions(type, from_user_id, to_user_id, amount)
-        VALUES ('TRANSFER', sender_id, p_receiver_id, p_coin_amount);
+        INSERT INTO public.transactions (type, from_user_id, to_user_id, amount) VALUES ('TRANSFER', sender_id, p_receiver_id, p_coin_amount);
     END IF;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 
 -- =================================================================================================
--- 5. RPC FUNCTIONS FOR DATA FETCHING (to centralize logic and security)
+-- 4. DATA-FETCHING FUNCTIONS (RPC)
+-- Read-only functions for securely fetching data for the UI.
 -- =================================================================================================
 
--- Get player's fight and bet history
 CREATE OR REPLACE FUNCTION public.get_player_fight_history(p_user_id uuid)
-RETURNS TABLE(id bigint, winner public.fight_winner, commission numeric, bet json, outcome text) AS $$
-BEGIN
-    RETURN QUERY
+RETURNS TABLE(id bigint, winner public.fight_winner, commission numeric, bet json, outcome text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
     SELECT
         f.id,
         f.winner,
         f.commission,
-        (SELECT row_to_json(b) FROM public.bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) as bet,
+        (SELECT row_to_json(b) FROM bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) as bet,
         CASE
-            WHEN f.winner IS NOT NULL AND (SELECT b.choice::text FROM public.bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = f.winner::text THEN 'WIN'
-            WHEN f.winner IN ('DRAW', 'CANCELLED') AND (SELECT 1 FROM public.bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = 1 THEN 'REFUND'
-            WHEN (SELECT 1 FROM public.bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = 1 THEN 'LOSS'
+            WHEN (SELECT b.choice::text FROM bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = f.winner::text THEN 'WIN'
+            WHEN f.winner IN ('DRAW', 'CANCELLED') AND (SELECT 1 FROM bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = 1 THEN 'REFUND'
+            WHEN (SELECT 1 FROM bets b WHERE b.fight_id = f.id AND b.user_id = p_user_id) = 1 THEN 'LOSS'
             ELSE NULL
         END as outcome
-    FROM public.fights f
+    FROM fights f
     WHERE f.status = 'SETTLED'
     ORDER BY f.id DESC;
-END;
-$$ LANGUAGE plpgsql;
+$$;
 
--- Get user's transaction history
 CREATE OR REPLACE FUNCTION public.get_user_transactions(p_user_id uuid)
-RETURNS SETOF public.transactions AS $$
-BEGIN
-    RETURN QUERY
+RETURNS SETOF public.transactions
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
     SELECT * FROM public.transactions
     WHERE from_user_id = p_user_id OR to_user_id = p_user_id
     ORDER BY transaction_timestamp DESC;
-END;
-$$ LANGUAGE plpgsql;
+$$;
 
--- Get pending requests for a master agent from their agents
 CREATE OR REPLACE FUNCTION public.get_agent_requests_for_master(p_master_agent_id uuid)
-RETURNS SETOF public.coin_requests AS $$
-BEGIN
-    RETURN QUERY
-    SELECT cr.*
-    FROM public.coin_requests cr
-    JOIN public.profiles p ON cr.from_user_id = p.id
-    WHERE p.master_agent_id = p_master_agent_id AND cr.status = 'PENDING'
-    ORDER BY cr.created_at ASC;
-END;
-$$ LANGUAGE plpgsql;
+RETURNS SETOF public.coin_requests
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT r.* FROM public.coin_requests r
+    JOIN public.profiles p ON r.from_user_id = p.id
+    WHERE r.to_user_id = p_master_agent_id AND r.status = 'PENDING' AND p.role = 'AGENT';
+$$;
 
--- Get chat messages between two users
 CREATE OR REPLACE FUNCTION public.get_messages(user1_id uuid, user2_id uuid)
-RETURNS SETOF public.messages AS $$
-BEGIN
-    RETURN QUERY
-    SELECT *
-    FROM public.messages
+RETURNS SETOF public.messages
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT * FROM public.messages
     WHERE (sender_id = user1_id AND receiver_id = user2_id)
        OR (sender_id = user2_id AND receiver_id = user1_id)
     ORDER BY created_at ASC;
-END;
-$$ LANGUAGE plpgsql;
-
+$$;
 
 -- =================================================================================================
--- 6. ROW LEVEL SECURITY (RLS)
+-- 5. TRIGGERS & ROW-LEVEL SECURITY (RLS)
+-- Secures the database by defining access rules for each role.
 -- =================================================================================================
 
+-- Create the trigger that executes handle_new_user on new user creation
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- Enable RLS for all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view all profiles" ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-
 ALTER TABLE public.fights ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "All users can view fights" ON public.fights FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Operators can manage fights" ON public.fights FOR ALL USING ( (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR' );
-
 ALTER TABLE public.upcoming_fights ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "All users can view upcoming fights" ON public.upcoming_fights FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Operators can manage upcoming fights" ON public.upcoming_fights FOR ALL USING ( (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR' );
-
 ALTER TABLE public.bets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "All users can view all bets" ON public.bets FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Players can place their own bets" ON public.bets FOR INSERT WITH CHECK (auth.uid() = user_id AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'PLAYER');
-
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view their own transactions" ON public.transactions FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
-
 ALTER TABLE public.coin_requests ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view requests they are involved in" ON public.coin_requests FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
-CREATE POLICY "Users can create their own requests" ON public.coin_requests FOR INSERT WITH CHECK (auth.uid() = from_user_id);
-
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can view messages they sent or received" ON public.messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
-CREATE POLICY "Users can send messages" ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
+
+-- RLS POLICIES
+
+-- Profiles Table
+CREATE POLICY "Users can view their own profile." ON public.profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Authenticated users can view all profiles (for lookups)." ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Users can update their own profile." ON public.profiles FOR UPDATE USING (auth.uid() = id);
+
+-- Fights Table
+CREATE POLICY "All authenticated users can view fights." ON public.fights FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Operators can create and update fights." ON public.fights FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
+
+-- Upcoming Fights Table
+CREATE POLICY "All authenticated users can view upcoming fights." ON public.upcoming_fights FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Operators can manage the upcoming fights queue." ON public.upcoming_fights FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'OPERATOR');
+
+-- Bets Table
+CREATE POLICY "Users can view their own bets." ON public.bets FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can view all bets on a fight (anonymized in UI)." ON public.bets FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Players can place bets." ON public.bets FOR INSERT WITH CHECK (auth.uid() = user_id AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'PLAYER');
+
+-- Transactions Table
+CREATE POLICY "Users can view their own transactions." ON public.transactions FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
+
+-- Coin Requests Table
+CREATE POLICY "Users can see requests they sent or received." ON public.coin_requests FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
+CREATE POLICY "Users can create coin requests." ON public.coin_requests FOR INSERT WITH CHECK (auth.uid() = from_user_id);
+CREATE POLICY "Users can update requests sent to them." ON public.coin_requests FOR UPDATE USING (auth.uid() = to_user_id);
+
+-- Messages Table
+CREATE POLICY "Users can see messages they sent or received." ON public.messages FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+CREATE POLICY "Users can send messages." ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
 
 
 -- =================================================================================================
--- 7. REAL-TIME CONFIGURATION
+-- 6. REAL-TIME CONFIGURATION
+-- Enables real-time updates for the application.
 -- =================================================================================================
 
--- Set REPLICA IDENTITY to FULL for tables that will be part of the publication.
--- This is necessary for real-time to broadcast changes correctly, especially with RLS enabled.
+-- Set REPLICA IDENTITY to FULL for tables that will have real-time updates with RLS
 ALTER TABLE public.profiles REPLICA IDENTITY FULL;
 ALTER TABLE public.fights REPLICA IDENTITY FULL;
 ALTER TABLE public.upcoming_fights REPLICA IDENTITY FULL;
@@ -524,8 +544,14 @@ ALTER TABLE public.messages REPLICA IDENTITY FULL;
 
 -- Add tables to the publication for real-time updates
 DROP PUBLICATION IF EXISTS supabase_realtime;
-CREATE PUBLICATION supabase_realtime FOR ALL TABLES;
-
+CREATE PUBLICATION supabase_realtime;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.fights;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.upcoming_fights;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.bets;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.coin_requests;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
 
 -- =================================================================================================
 -- END OF SCRIPT
