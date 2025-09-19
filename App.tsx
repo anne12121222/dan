@@ -158,7 +158,9 @@ const App: React.FC = () => {
                  if (agentsError) throw agentsError;
                  myAgents = agentsData.map(a => ({...a, coinBalance: a.coin_balance, commissionBalance: a.commission_balance, commissionRate: a.commission_rate, transferFee: a.transfer_fee, masterAgentId: a.master_agent_id})) as Agent[];
                  
-                 const { data: requestsData, error: requestsError } = await supabase.rpc('get_agent_requests_for_master', { p_master_agent_id: user.id });
+                 // FIX: Directly query coin_requests for master agent, instead of relying on RPC.
+                 // Master agent should see requests where they are the recipient and status is PENDING.
+                 const { data: requestsData, error: requestsError } = await supabase.from('coin_requests').select('*').eq('to_user_id', user.id).eq('status', 'PENDING');
                  if (requestsError) throw requestsError;
                  coinRequests = requestsData.map(r => ({...r, fromUserId: r.from_user_id, toUserId: r.to_user_id, createdAt: r.created_at}));
             }
@@ -405,12 +407,21 @@ const App: React.FC = () => {
     };
     
     const handleDeclareWinner = async (winner: FightWinner) => {
-        if (!supabase || !appState.fightId) return;
+        if (!supabase || !appState.fightId) {
+            console.error("Supabase client not available or no active fight to declare winner.");
+            return;
+        }
+        console.log(`Attempting to declare winner: ${winner} for fight ID: ${appState.fightId}`);
         const { error } = await supabase.rpc('declare_winner', { p_fight_id: appState.fightId, p_winner: winner });
         if (error) {
+            console.error("Error declaring winner:", error); // Added more detailed logging
             showNotification(error.message, 'error');
         } else {
             showNotification(`Winner declared: ${winner}`, 'success');
+            // Explicitly refetch all data to ensure UI updates after winner declaration
+            if (currentUser) {
+                await fetchAllData(currentUser);
+            }
         }
     };
     
@@ -422,6 +433,10 @@ const App: React.FC = () => {
             return error.message;
         }
         showNotification("Fight added to queue.", "success");
+        // Explicitly refetch all data to ensure UI updates after adding a fight
+        if (currentUser) {
+            await fetchAllData(currentUser);
+        }
         return null;
     };
     
@@ -432,6 +447,9 @@ const App: React.FC = () => {
             showNotification(error.message, 'error');
         } else {
             showNotification("Next fight started!", "success");
+            if (currentUser) {
+                await fetchAllData(currentUser); // Explicitly refresh data
+            }
         }
     };
 
@@ -442,6 +460,9 @@ const App: React.FC = () => {
             showNotification(error.message, 'error');
         } else {
             showNotification("Betting closed.", 'success');
+            if (currentUser) {
+                await fetchAllData(currentUser); // Explicitly refresh data
+            }
         }
     };
 
@@ -490,7 +511,7 @@ const App: React.FC = () => {
     }, [currentUser]);
     
     const handleSendMessage = async (text: string, amount: number) => {
-        if (!supabase || !chatTargetUser) return;
+        if (!supabase || !chatTargetUser || !currentUser) return; // Added currentUser check
         const { error } = await supabase.rpc('send_message', {
             p_receiver_id: chatTargetUser.id,
             p_text: text,
@@ -498,6 +519,16 @@ const App: React.FC = () => {
         });
         if (error) {
             showNotification(error.message, 'error');
+        } else {
+            // Optimistically add the sent message to the chatMessages state
+            setChatMessages(prev => [...prev, {
+                id: Math.random().toString(), // Temporary ID, will be replaced by real-time update
+                senderId: currentUser.id,
+                receiverId: chatTargetUser.id,
+                text: text,
+                createdAt: new Date().toISOString()
+            }]);
+            showNotification("Message sent.", "success"); // Added success notification
         }
     };
     
