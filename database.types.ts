@@ -204,7 +204,7 @@ export interface Database {
           p_red_text: string
           p_white_text: string
         }
-        Returns: undefined
+        Returns: number
       }
       close_betting: {
         Args: {
@@ -213,6 +213,24 @@ export interface Database {
         Returns: undefined
       }
       create_agent_user: {
+        Args: {
+          p_name: string
+          p_email: string
+          p_password: string
+        }
+        Returns: string
+      }
+      // FIX: Add missing function definition for creating a master agent user.
+      create_master_agent_user: {
+        Args: {
+          p_name: string
+          p_email: string
+          p_password: string
+        }
+        Returns: string
+      }
+      // FIX: Add missing function definition for creating an operator user.
+      create_operator_user: {
         Args: {
           p_name: string
           p_email: string
@@ -234,6 +252,18 @@ export interface Database {
         }
         Returns: undefined
       }
+      get_messages: {
+        Args: {
+          p_contact_id: string
+        }
+        Returns: {
+            id: string
+            sender_id: string
+            receiver_id: string
+            text: string
+            created_at: string
+        }[]
+      }
       place_bet: {
         Args: {
           p_fight_id: number
@@ -246,6 +276,15 @@ export interface Database {
         Args: {
           p_request_id: string
           p_response: "APPROVED" | "DECLINED"
+        }
+        Returns: string
+      }
+      // FIX: Add missing function definition for sending a message and coins.
+      send_message_and_coins: {
+        Args: {
+          p_receiver_id: string
+          p_text: string
+          p_amount: number
         }
         Returns: string
       }

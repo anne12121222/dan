@@ -10,6 +10,7 @@ drop function if exists public.create_operator_user;
 drop function if exists public.create_master_agent_user;
 drop function if exists public.get_registerable_agents;
 drop function if exists public.get_all_users_for_operator;
+drop function if exists public.get_messages;
 drop function if exists public.respond_to_coin_request;
 -- FIX: Explicitly drop known overloads of the function to resolve ambiguity.
 drop function if exists public.send_message_and_coins(uuid, text, integer);
@@ -416,6 +417,25 @@ end;
 $$;
 comment on function public.get_all_users_for_operator is 'Returns all users on the platform, for operators only.';
 
+-- CHAT HISTORY FIX: New function to reliably get messages.
+create or replace function public.get_messages(p_contact_id uuid)
+returns setof public.messages
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  -- RLS is implicitly handled by `auth.uid()` which is secure in a definer function.
+  return query
+    select * from public.messages m
+    where (m.sender_id = auth.uid() and m.receiver_id = p_contact_id)
+       or (m.sender_id = p_contact_id and m.receiver_id = auth.uid())
+    order by m.created_at asc;
+end;
+$$;
+comment on function public.get_messages(uuid) is 'Reliably fetches the message history between the current user and a contact.';
+
+
 -- Financial & Communication RPCs
 create or replace function public.create_coin_request(p_to_user_id uuid, p_amount numeric)
 returns void
@@ -536,16 +556,21 @@ comment on function public.send_message_and_coins(uuid, text, numeric) is 'Sends
 
 
 -- Game Logic RPCs
+-- OPERATOR BUTTON FIX: Function now returns the ID of the new fight.
 create or replace function public.add_upcoming_fight(p_red_text text, p_white_text text)
-returns void
+returns int
 language plpgsql
 as $$
+declare
+  new_fight_id int;
 begin
   insert into public.upcoming_fights (participants)
-  values (jsonb_build_object('red', p_red_text, 'white', p_white_text));
+  values (jsonb_build_object('red', p_red_text, 'white', p_white_text))
+  returning id into new_fight_id;
+  return new_fight_id;
 end;
 $$;
-comment on function public.add_upcoming_fight(text, text) is 'Adds a new fight to the queue.';
+comment on function public.add_upcoming_fight(text, text) is 'Adds a new fight to the queue and returns its ID.';
 
 create or replace function public.start_next_fight()
 returns void

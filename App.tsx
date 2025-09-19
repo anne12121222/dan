@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -340,19 +341,22 @@ const App: React.FC = () => {
   // Effect for fetching messages and subscribing to chat channel
   useEffect(() => {
     if (!supabase || !currentUser || !chatTargetUser) {
-        // Do not clear messages when modal is closed, so history is preserved.
+        // CHAT HISTORY FIX: Do not clear messages when modal is closed.
+        // The state will persist until a new chat target is selected.
         return;
     };
     
+    // CHAT HISTORY FIX: Use the new, robust RPC function to fetch messages.
     const fetchMessages = async () => {
-        const { data } = await supabase.from('messages')
-            .select('*')
-            .or(`(sender_id.eq.${currentUser.id},receiver_id.eq.${chatTargetUser.id}),(sender_id.eq.${chatTargetUser.id},receiver_id.eq.${currentUser.id})`)
-            .order('created_at', { ascending: true });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call. The error is fixed by updating database.types.ts.
+        const { data, error } = await supabase.rpc('get_messages', { p_contact_id: chatTargetUser.id });
             
         if (data) {
             const mappedMessages = (data as MessageRow[]).map(m => ({ id: m.id, senderId: m.sender_id, receiverId: m.receiver_id, text: m.text, createdAt: m.created_at }));
             setMessages(mappedMessages);
+        } else if (error) {
+            console.error("Error fetching messages:", error);
+            setMessages([]); // Clear messages on error to avoid showing stale chat
         }
     }
     fetchMessages();
@@ -412,7 +416,8 @@ const App: React.FC = () => {
     if (currentUser.coinBalance < amount) return "Insufficient balance";
 
     setLoading(true);
-    const { data, error } = await (supabase.rpc as any)('place_bet', { p_fight_id: activeFight.id, p_amount: amount, p_choice: choice });
+    // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+    const { data, error } = await supabase.rpc('place_bet', { p_fight_id: activeFight.id, p_amount: amount, p_choice: choice });
     setLoading(false);
 
     if (error) { return error.message; }
@@ -426,7 +431,8 @@ const App: React.FC = () => {
   const handleCreateAgent = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    const { data, error } = await (supabase.rpc as any)('create_agent_user', { p_name: name, p_email: email, p_password: password });
+    // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+    const { data, error } = await supabase.rpc('create_agent_user', { p_name: name, p_email: email, p_password: password });
     setLoading(false);
     if (error) { return error.message; }
     if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
@@ -437,7 +443,8 @@ const App: React.FC = () => {
     const handleCreateMasterAgent = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!supabase) return "Supabase not configured";
         setLoading(true);
-        const { data, error } = await (supabase.rpc as any)('create_master_agent_user', { p_name: name, p_email: email, p_password: password });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { data, error } = await supabase.rpc('create_master_agent_user', { p_name: name, p_email: email, p_password: password });
         setLoading(false);
         if (error) { return error.message; }
         if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
@@ -448,7 +455,8 @@ const App: React.FC = () => {
     const handleCreateOperator = async (name: string, email: string, password: string): Promise<string | null> => {
         if (!supabase) return "Supabase not configured";
         setLoading(true);
-        const { data, error } = await (supabase.rpc as any)('create_operator_user', { p_name: name, p_email: email, p_password: password });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { data, error } = await supabase.rpc('create_operator_user', { p_name: name, p_email: email, p_password: password });
         setLoading(false);
         if (error) { return error.message; }
         if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
@@ -459,13 +467,19 @@ const App: React.FC = () => {
   const handleAddUpcomingFight = async (red: string, white: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    const { error } = await (supabase.rpc as any)('add_upcoming_fight', { p_red_text: red, p_white_text: white });
+    // OPERATOR BUTTON FIX: The RPC now returns the ID of the new fight.
+    // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+    const { error, data: newFightId } = await supabase.rpc('add_upcoming_fight', { p_red_text: red, p_white_text: white });
     setLoading(false);
     if (error) { return error.message; }
     
-    // ROBUSTNESS FIX: Manually refetch fight data immediately after adding a fight.
-    // This ensures the operator sees the "Start Next Fight" button instantly.
-    await fetchActiveFight();
+    // OPERATOR BUTTON FIX: Optimistically update the UI to bypass replication lag.
+    // This guarantees the "Start Next Fight" button appears instantly.
+    const newFight: UpcomingFight = {
+        id: newFightId as number,
+        participants: { red, white }
+    };
+    setUpcomingFights(currentFights => [...currentFights, newFight]);
 
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;
@@ -484,7 +498,8 @@ const App: React.FC = () => {
   const handleCloseBetting = async (): Promise<string | null> => {
     if (!supabase || !activeFight) return "No active fight.";
     setLoading(true);
-    const { error } = await (supabase.rpc as any)('close_betting', { p_fight_id: activeFight.id });
+    // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+    const { error } = await supabase.rpc('close_betting', { p_fight_id: activeFight.id });
     setLoading(false);
     if (error) { setNotification({ message: error.message, type: 'error' }); return error.message; }
     setNotification({ message: 'Betting is now closed!', type: 'success' });
@@ -494,7 +509,8 @@ const App: React.FC = () => {
     const handleDeclareWinner = async (winner: FightWinner): Promise<string | null> => {
         if (!supabase || !activeFight) return "No active fight to declare winner for.";
         setLoading(true);
-        const { error } = await (supabase.rpc as any)('declare_winner', { p_fight_id: activeFight.id, p_winner_text: winner });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { error } = await supabase.rpc('declare_winner', { p_fight_id: activeFight.id, p_winner_text: winner });
         setLoading(false);
         if (error) { setNotification({ message: error.message, type: 'error' }); return error.message; }
         setNotification({ message: `Winner declared: ${winner}! Bets are being settled.`, type: 'success' });
@@ -504,7 +520,8 @@ const App: React.FC = () => {
     const handleCreateCoinRequest = async (amount: number, targetUserId: string): Promise<string | null> => {
         if (!currentUser || !supabase) return "Invalid request";
         setLoading(true);
-        const { error, data } = await (supabase.rpc as any)('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { error } = await supabase.rpc('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
         setLoading(false);
         if (error) { return error.message; }
         
@@ -521,7 +538,8 @@ const App: React.FC = () => {
     const handleRespondToCoinRequest = async (requestId: string, response: 'APPROVED' | 'DECLINED'): Promise<string | null> => {
         if (!supabase) return "Supabase not configured";
         setLoading(true);
-        const { data, error } = await (supabase.rpc as any)('respond_to_coin_request', { p_request_id: requestId, p_response: response });
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { data, error } = await supabase.rpc('respond_to_coin_request', { p_request_id: requestId, p_response: response });
         setLoading(false);
         if (error) { return error.message; }
         if (data && typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
@@ -548,7 +566,8 @@ const App: React.FC = () => {
             setMessages(current => [...current, optimisticMessage]);
         }
         
-        const { error, data } = await (supabase.rpc as any)('send_message_and_coins', {
+        // FIX: Remove `as any` casting for type-safe Supabase RPC call.
+        const { error, data } = await supabase.rpc('send_message_and_coins', {
             p_receiver_id: chatTargetUser.id,
             p_text: text,
             p_amount: amount
@@ -677,7 +696,10 @@ const App: React.FC = () => {
             currentUser={currentUser}
             chatTargetUser={chatTargetUser}
             messages={messages}
-            onClose={() => setChatTargetUser(null)}
+            onClose={() => {
+                setChatTargetUser(null);
+                // Do not clear messages here to preserve history
+            }}
             onSendMessage={handleSendMessage}
         />
       )}
