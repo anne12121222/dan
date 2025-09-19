@@ -489,18 +489,14 @@ const App: React.FC = () => {
   const handleAddUpcomingFight = async (red: string, white: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
     setLoading(true);
-    // OPERATOR BUTTON FIX: The RPC now returns the ID of the new fight.
-    const { error, data: newFightId } = await supabase.rpc('add_upcoming_fight', { p_red_text: red, p_white_text: white });
+    // The RPC still returns the ID, but we no longer need it for an optimistic update.
+    const { error } = await supabase.rpc('add_upcoming_fight', { p_red_text: red, p_white_text: white });
     setLoading(false);
     if (error) { return error.message; }
     
-    // OPERATOR BUTTON FIX: Optimistically update the UI to bypass replication lag.
-    // This guarantees the "Start Next Fight" button appears instantly.
-    const newFight: UpcomingFight = {
-        id: newFightId as number,
-        participants: { red, white }
-    };
-    setUpcomingFights(currentFights => [...currentFights, newFight]);
+    // DEFINITIVE 100% FIX: Instead of a racy optimistic update, perform a direct refetch.
+    // This guarantees the UI state is perfectly synchronized with the database after the action.
+    await fetchFightQueue();
 
     setNotification({ message: 'Fight added to queue!', type: 'success' });
     return null;

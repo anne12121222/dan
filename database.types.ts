@@ -210,7 +210,7 @@ export interface Database {
         Args: {
           p_fight_id: number
         }
-        Returns: undefined
+        Returns: void
       },
       create_agent_user: {
         Args: {
@@ -220,7 +220,6 @@ export interface Database {
         }
         Returns: string
       },
-      // FIX: Add missing function definition for creating a master agent user.
       create_master_agent_user: {
         Args: {
           p_name: string
@@ -229,7 +228,6 @@ export interface Database {
         }
         Returns: string
       },
-      // FIX: Add missing function definition for creating an operator user.
       create_operator_user: {
         Args: {
           p_name: string
@@ -243,26 +241,20 @@ export interface Database {
           p_to_user_id: string
           p_amount: number
         }
-        Returns: undefined
+        Returns: void
       },
       declare_winner: {
         Args: {
           p_fight_id: number
           p_winner_text: "RED" | "WHITE" | "DRAW" | "CANCELLED"
         }
-        Returns: undefined
+        Returns: void
       },
       get_messages: {
         Args: {
           p_contact_id: string
         }
-        Returns: {
-            id: string
-            sender_id: string
-            receiver_id: string
-            text: string
-            created_at: string
-        }[]
+        Returns: Json
       },
       place_bet: {
         Args: {
@@ -279,7 +271,6 @@ export interface Database {
         }
         Returns: string
       },
-      // FIX: Add missing function definition for sending a message and coins.
       send_message_and_coins: {
         Args: {
           p_receiver_id: string
@@ -290,7 +281,7 @@ export interface Database {
       },
       start_next_fight: {
         Args: {}
-        Returns: undefined
+        Returns: void
       }
     }
     Enums: {
