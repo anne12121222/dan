@@ -28,13 +28,14 @@ DROP FUNCTION IF EXISTS public.create_master_agent_user(text, text, text);
 DROP FUNCTION IF EXISTS public.create_operator_user(text, text, text);
 DROP FUNCTION IF EXISTS public.add_upcoming_fight(text, text);
 DROP FUNCTION IF EXISTS public.start_next_fight();
+-- FIX: Explicitly drop both potential versions of close_betting to resolve ambiguity
+DROP FUNCTION IF EXISTS public.close_betting(bigint);
 DROP FUNCTION IF EXISTS public.close_betting(integer);
 DROP FUNCTION IF EXISTS public.declare_winner(integer, text);
 DROP FUNCTION IF EXISTS public.place_bet(integer, numeric, text);
 DROP FUNCTION IF EXISTS public.create_coin_request(uuid, numeric);
--- FIX: Drop both the old enum-based and new text-based versions to resolve function ambiguity
 DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, text);
-DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status);
+DROP FUNCTION IF EXISTS public.respond_to_coin_request(uuid, public.request_status_enum); 
 DROP FUNCTION IF EXISTS public.get_messages(uuid);
 DROP FUNCTION IF EXISTS public.send_message_and_coins(uuid, text, numeric);
 DROP FUNCTION IF EXISTS public.get_my_coin_requests();
@@ -58,6 +59,7 @@ DROP TYPE IF EXISTS public.bet_choice;
 DROP TYPE IF EXISTS public.fight_winner;
 DROP TYPE IF EXISTS public.transaction_type;
 DROP TYPE IF EXISTS public.request_status;
+DROP TYPE IF EXISTS public.request_status_enum; -- Also drop the old enum type
 
 -- =============================================
 -- 1. CREATE ENUM TYPES

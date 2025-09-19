@@ -1,4 +1,10 @@
-export type Json = any
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
 
 // FIX: Reverted from `type` to `interface`. The `type` alias was causing a circular reference
 // issue with the `add_upcoming_fight` function's return type, leading to `never` type
@@ -62,7 +68,8 @@ export interface Database {
         Row: {
           id: number
           winner: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
-          participants: Json | null
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants: { red: string; white: string } | null
           status: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
           created_at: string
           settled_at: string | null
@@ -71,7 +78,8 @@ export interface Database {
         Insert: {
           id?: number
           winner?: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
-          participants?: Json | null
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants?: { red: string; white: string } | null
           status?: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
           created_at?: string
           settled_at?: string | null
@@ -80,7 +88,8 @@ export interface Database {
         Update: {
           id?: number
           winner?: "RED" | "WHITE" | "DRAW" | "CANCELLED" | null
-          participants?: Json | null
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants?: { red: string; white: string } | null
           status?: "BETTING_OPEN" | "BETTING_CLOSED" | "SETTLED"
           created_at?: string
           settled_at?: string | null
@@ -177,17 +186,20 @@ export interface Database {
       upcoming_fights: {
         Row: {
           id: number
-          participants: Json
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants: { red: string; white: string }
           created_at: string
         }
         Insert: {
           id?: number
-          participants: Json
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants: { red: string; white: string }
           created_at?: string
         }
         Update: {
           id?: number
-          participants?: Json
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants?: { red: string; white: string }
           created_at?: string
         }
       }
@@ -206,7 +218,8 @@ export interface Database {
         // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
         Returns: {
           id: number
-          participants: Json
+          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
+          participants: { red: string; white: string }
           created_at: string
         }[]
       }

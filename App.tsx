@@ -1,7 +1,6 @@
-
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { v4 as uuidv4 } from 'uuid';
 import {
   AllUserTypes, UserRole, FightStatus, Player, Agent, MasterAgent, Operator,
   Bet, BetChoice, FightWinner, UpcomingFight, FightResult, PlayerFightHistoryEntry,
@@ -216,6 +215,23 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
+  // FIX: Fetch agents for the registration form when the app loads and the user is not logged in.
+  useEffect(() => {
+    const fetchPublicAgents = async () => {
+      if (!supabase) return;
+      const { data, error } = await supabase.from('profiles').select('*').eq('role', 'AGENT');
+      if (error) {
+        console.error("Error fetching agents for registration:", error);
+      } else if (data) {
+        setAgents(data.map(mapProfileToUser) as Agent[]);
+      }
+    };
+    
+    if (!session && isSupabaseConfigured) {
+      fetchPublicAgents();
+    }
+  }, [session]);
+
   // Realtime Subscriptions
   useEffect(() => {
     if (!supabase || !currentUser) return;
@@ -361,17 +377,31 @@ const App: React.FC = () => {
   const handleStartChat = (user: AllUserTypes) => setChatTargetUser(user);
 
   const handleSendMessage = async (text: string, amount: number) => {
-      if (!chatTargetUser) return;
-      const { data, error } = await supabase.rpc('send_message_and_coins', { p_receiver_id: chatTargetUser.id, p_text: text, p_amount: amount });
-      if (error) {
-          showNotification(error.message, 'error');
-      }
-       if (data) { // If RPC returns an error message as string
+    if (!chatTargetUser || !currentUser) return;
+
+    // FIX: Optimistic update for an instantaneous UI response for the sender.
+    const tempId = uuidv4();
+    const optimisticMessage: Message = {
+      id: tempId,
+      senderId: currentUser.id,
+      receiverId: chatTargetUser.id,
+      text: text,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, optimisticMessage]);
+
+    const { data, error } = await supabase.rpc('send_message_and_coins', { p_receiver_id: chatTargetUser.id, p_text: text, p_amount: amount });
+    
+    if (error) {
+        showNotification(error.message, 'error');
+        // Revert optimistic update on error
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+    } else if (data) { // If RPC returns an error message as string
         showNotification(data, 'error');
-      }
-      // Re-fetch messages after sending
-      const { data: msgs } = await supabase.rpc('get_messages', { p_contact_id: chatTargetUser.id });
-      setMessages(msgs || []);
+        // Revert optimistic update on error
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
+    // No manual refetch needed; the real-time subscription will handle incoming messages for the receiver.
   };
   
   // Operator Handlers
@@ -398,9 +428,13 @@ const App: React.FC = () => {
   
   const onStartNextFight = async () => {
     const { error } = await supabase.rpc('start_next_fight');
-    if (error) showNotification(error.message, 'error');
-    else {
+    if (error) {
+        showNotification(error.message, 'error');
+    } else {
       showNotification('Next fight started!', 'success');
+      // By fetching the state directly after the RPC call, we guarantee the UI
+      // updates instantly and the timer starts without relying on real-time event timing.
+      await fetchFightState();
       setTimer(FIGHT_TIMER_DURATION);
     }
   };
@@ -441,7 +475,7 @@ const App: React.FC = () => {
 
 
   useEffect(() => {
-    if(chatTargetUser) {
+    if(chatTargetUser && currentUser) {
         const fetchMessages = async () => {
             const { data, error } = await supabase.rpc('get_messages', {p_contact_id: chatTargetUser.id});
             if(error) console.error(error);
@@ -450,12 +484,19 @@ const App: React.FC = () => {
         fetchMessages();
 
         const messageChannel = supabase.channel(`messages_with_${chatTargetUser.id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `or(and(sender_id.eq.${currentUser!.id},receiver_id.eq.${chatTargetUser.id}),and(sender_id.eq.${chatTargetUser.id},receiver_id.eq.${currentUser!.id}))`}, 
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${currentUser!.id}`}, 
             (payload) => {
-                setMessages(prev => [...prev, payload.new as Message]);
+                // FIX: Only add incoming messages from the other user. Sender's messages are handled optimistically.
+                const newMessage = payload.new as Message;
+                if (newMessage.senderId === chatTargetUser.id) {
+                    setMessages(prev => [...prev, newMessage]);
+                }
             }).subscribe();
         
-        return () => { supabase.removeChannel(messageChannel); }
+        return () => { 
+            supabase.removeChannel(messageChannel); 
+            setMessages([]); // Clear messages when chat is closed
+        }
     }
   }, [chatTargetUser, currentUser]);
   
