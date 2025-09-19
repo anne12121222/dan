@@ -126,7 +126,7 @@ create or replace function public.get_user_view_data()
 returns table(id uuid)
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public
 as $$
 declare
     current_user_id uuid := auth.uid();
@@ -200,17 +200,21 @@ create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public
 as $$
 begin
-  insert into public.profiles (id, name, email, role, agent_id)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)), -- Use provided name, or default to email part
-    new.email,
-    'PLAYER'::public.user_role,
-    (new.raw_user_meta_data->>'agent_id')::uuid
-  );
+  -- Robustness Fix: Check if a profile already exists. This prevents errors if an admin function
+  -- creates the profile manually before the trigger fires.
+  if not exists (select 1 from public.profiles where id = new.id) then
+    insert into public.profiles (id, name, email, role, agent_id)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)), -- Use provided name, or default to email part
+      new.email,
+      'PLAYER'::public.user_role,
+      (new.raw_user_meta_data->>'agent_id')::uuid
+    );
+  end if;
   return new;
 end;
 $$;
@@ -228,7 +232,7 @@ create or replace function public.create_agent_user(p_name text, p_email text, p
 returns text
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public, auth
 as $$
 declare
   new_user_id uuid;
@@ -238,7 +242,7 @@ begin
   end if;
 
   -- Use the admin API to create the user directly. This bypasses email confirmation.
-  select auth.admin.create_user(
+  select admin.create_user(
     p_email,
     p_password,
     jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
@@ -268,7 +272,7 @@ create or replace function public.create_master_agent_user(p_name text, p_email 
 returns text
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public, auth
 as $$
 declare
   new_user_id uuid;
@@ -279,7 +283,7 @@ begin
     return 'Error: Only Master Agents can create new Master Agents.';
   end if;
 
-  select auth.admin.create_user(
+  select admin.create_user(
     p_email,
     p_password,
     jsonb_build_object('name', p_name)
@@ -310,7 +314,7 @@ create or replace function public.create_operator_user(p_name text, p_email text
 returns text
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public, auth
 as $$
 declare
   new_user_id uuid;
@@ -320,7 +324,7 @@ begin
   end if;
 
   -- Use the admin API to create the user directly.
-  select auth.admin.create_user(
+  select admin.create_user(
     p_email,
     p_password,
     jsonb_build_object('name', p_name) -- This becomes raw_user_meta_data
@@ -361,7 +365,7 @@ create or replace function public.get_all_users_for_operator()
 returns setof public.profiles
 language plpgsql
 security definer
-set search_path = ''
+set search_path = public
 as $$
 begin
   if (select role from public.profiles where id = auth.uid()) <> 'OPERATOR'::public.user_role then

@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -161,6 +163,13 @@ const App: React.FC = () => {
         }
 
         // Role-specific data
+        if (currentUser.role === UserRole.OPERATOR) {
+            // Operator needs to see all users to display names in the bet list.
+            const { data } = await supabase.from('profiles').select('id'); // Just get IDs to be efficient
+            if (data) {
+                (data as { id: string }[]).forEach(p => userIdsToFetch.add(p.id));
+            }
+        }
         if (currentUser.role === UserRole.MASTER_AGENT) {
             const { data } = await supabase.from('profiles').select('*').eq('master_agent_id', currentUser.id);
             if (data) {
