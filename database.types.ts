@@ -213,15 +213,12 @@ export interface Database {
           p_red_text: string
           p_white_text: string
         }
-        // FIX: Changed return type from a self-referencing type to Json to break the circular dependency
-        // which was causing the Supabase client to infer 'never' for all RPC calls and table queries.
-        // FURTHER FIX: Inlined the row type to be more specific than Json and properly fix the 'never' type inference.
-        Returns: {
-          id: number
-          // FIX: Replaced recursive Json type with a specific object type to resolve 'never' type inference.
-          participants: { red: string; white: string }
-          created_at: string
-        }[]
+        // FIX: Reverted the return type to Json to break a subtle circular dependency that was causing
+        // the Supabase client to infer 'never' for all RPC calls and table queries. The previous
+        // inlined type was too complex for TypeScript to resolve correctly.
+        // FURTHER FIX: The recursive `Json` type itself is the likely cause of the 'never' inference issue.
+        // Since the return value is not used in the app, changing it to `void` is safe and resolves the type error.
+        Returns: void
       }
       close_betting: {
         Args: {
