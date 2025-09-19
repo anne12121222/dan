@@ -1,6 +1,4 @@
-// Grand Overhaul: This component is now fully functional and disables correctly.
 import React, { useState } from 'react';
-// FIX: Add .ts extension to fix module resolution.
 import { BetChoice, FightStatus, Bet } from '../types.ts';
 import BettingModal from './BettingModal.tsx';
 

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Player, FightStatus, Bet, FightWinner, PlayerFightHistoryEntry, UpcomingFight, BetChoice, AllUserTypes, Agent } from '../types.ts';
 import LiveFeed from './LiveFeed.tsx';
@@ -9,7 +8,6 @@ import FightHistory from './FightHistory.tsx';
 import RequestCoinsModal from './RequestCoinsModal.tsx';
 import RequestCoinsToAgentModal from './RequestCoinsToAgentModal.tsx';
 import UpcomingFightsDrawer from './UpcomingFightsDrawer.tsx';
-import NotificationComponent from './Notification.tsx';
 import { ChatBubbleLeftEllipsisIcon } from './common/Icons.tsx';
 import LiveBetsList from './LiveBetsList.tsx';
 
