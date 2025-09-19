@@ -207,7 +207,9 @@ export interface Database {
           p_red_text: string
           p_white_text: string
         }
-        Returns: Database["public"]["Tables"]["upcoming_fights"]["Row"][]
+        // FIX: Changed return type from a self-referencing type to Json to break the circular dependency
+        // which was causing the Supabase client to infer 'never' for all RPC calls and table queries.
+        Returns: Json
       }
       close_betting: {
         Args: {
