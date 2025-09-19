@@ -200,6 +200,8 @@ create policy "Unassigned users can see potential superiors" on public.profiles 
 -- Fights / Upcoming Fights Policies (publicly visible)
 create policy "All users can view fights." on public.fights for select using (true);
 create policy "All users can view upcoming fights." on public.upcoming_fights for select using (true);
+create policy "Operators can add upcoming fights." on public.upcoming_fights for insert with check ( (select role from public.profiles where id = auth.uid()) = 'OPERATOR'::public.user_role );
+
 
 -- Bets Policies
 create policy "Users can view their own bets." on public.bets for select using (auth.uid() = user_id);

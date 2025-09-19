@@ -156,7 +156,8 @@ const App: React.FC = () => {
         setCompletedFights(typedCompletedData);
         setLastWinner(typedCompletedData[0]?.winner || null);
         if (user) {
-            const { data: myBetsHistoryData } = await supabase.from('bets').select('*').in('fight_id', typedCompletedData.map(f => f.id));
+            // FIX: Explicitly type the map parameter `f` to resolve the "type 'never'" error due to a type inference failure.
+            const { data: myBetsHistoryData } = await supabase.from('bets').select('*').in('fight_id', typedCompletedData.map((f: FightRow) => f.id));
             if (myBetsHistoryData) {
                 // FIX: Add explicit type cast to resolve 'never' type inference issue.
                 const myBetsHistory = myBetsHistoryData as BetRow[];
@@ -277,8 +278,10 @@ const App: React.FC = () => {
   // FIX: Refactor handlers to use async/await and add guards for supabase client to fix type inference issues.
   const handleCreateAgent = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase || !currentUser) return "Client not ready";
-    const { data, error } = await supabase.rpc('create_agent_user', { p_name: name, p_email: email, p_password: password });
-    if (data?.includes('Success')) {
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { data, error } = await supabase.rpc('create_agent_user', { p_name: name, p_email: email, p_password: password } as any);
+    // FIX: Use explicit `data && ...` check to satisfy strict null check for `data`.
+    if (data && data.includes('Success')) {
       showNotification('Agent created!', 'success');
       fetchAllData(currentUser);
     }
@@ -286,39 +289,49 @@ const App: React.FC = () => {
   };
   const handleCreateMasterAgent = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Client not ready";
-    const { data, error } = await supabase.rpc('create_master_agent_user', { p_name: name, p_email: email, p_password: password });
-    if (data?.includes('Success')) showNotification('Master Agent created!', 'success');
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { data, error } = await supabase.rpc('create_master_agent_user', { p_name: name, p_email: email, p_password: password } as any);
+    // FIX: Use explicit `data && ...` check to satisfy strict null check for `data`.
+    if (data && data.includes('Success')) showNotification('Master Agent created!', 'success');
     return error ? error.message : (data || null);
   };
   const handleCreateOperator = async (name: string, email: string, password: string): Promise<string | null> => {
     if (!supabase) return "Client not ready";
-    const { data, error } = await supabase.rpc('create_operator_user', { p_name: name, p_email: email, p_password: password });
-    if (data?.includes('Success')) showNotification('Operator created!', 'success');
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { data, error } = await supabase.rpc('create_operator_user', { p_name: name, p_email: email, p_password: password } as any);
+    // FIX: Use explicit `data && ...` check to satisfy strict null check for `data`.
+    if (data && data.includes('Success')) showNotification('Operator created!', 'success');
     return error ? error.message : (data || null);
   };
   
   const handlePlaceBet = async (amount: number, choice: BetChoice): Promise<string | null> => {
     if (!supabase || !activeFight) return "Client not ready or no active fight";
-    const { data, error } = await supabase.rpc('place_bet', { p_fight_id: activeFight.id, p_amount: amount, p_choice: choice });
-    if (data?.includes('Success')) showNotification('Bet placed!', 'success');
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { data, error } = await supabase.rpc('place_bet', { p_fight_id: activeFight.id, p_amount: amount, p_choice: choice } as any);
+    // FIX: Use explicit `data && ...` check to satisfy strict null check for `data`.
+    if (data && data.includes('Success')) showNotification('Bet placed!', 'success');
     return error ? error.message : (data || null);
   };
   const handleCreateCoinRequest = async (amount: number, targetUserId: string): Promise<string | null> => {
     if (!supabase) return "Client not ready";
-    const { error } = await supabase.rpc('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount });
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { error } = await supabase.rpc('create_coin_request', { p_to_user_id: targetUserId, p_amount: amount } as any);
     if (!error) showNotification('Request sent!', 'success');
     return error ? error.message : null;
   };
   const handleRespondToRequest = async (requestId: string, response: 'APPROVED' | 'DECLINED'): Promise<string | null> => {
     if (!supabase) return "Client not ready";
-    const { data, error } = await supabase.rpc('respond_to_coin_request', { p_request_id: requestId, p_response: response });
-    if (data?.includes('Success')) showNotification(`Request ${response.toLowerCase()}!`, 'success');
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    const { data, error } = await supabase.rpc('respond_to_coin_request', { p_request_id: requestId, p_response: response } as any);
+    // FIX: Use explicit `data && ...` check to satisfy strict null check for `data`.
+    if (data && data.includes('Success')) showNotification(`Request ${response.toLowerCase()}!`, 'success');
     return error ? error.message : (data || null);
   };
   
   const handleSendMessage = async (text: string, amount: number) => {
       if (!chatTargetUser || !supabase || !currentUser) return;
-      await supabase.rpc('send_message_and_coins', { p_receiver_id: chatTargetUser.id, p_text: text, p_amount: amount });
+      // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+      await supabase.rpc('send_message_and_coins', { p_receiver_id: chatTargetUser.id, p_text: text, p_amount: amount } as any);
       if (text) { // Optimistic update for sender
            setMessages(prev => [...prev, { id: 'temp-'+Date.now(), senderId: currentUser.id, receiverId: chatTargetUser.id, text, createdAt: new Date().toISOString() }]);
       }
@@ -327,12 +340,14 @@ const App: React.FC = () => {
   
   const handleAddUpcomingFight = async (red: string, white: string) => {
     if (!supabase) return "Supabase client not available";
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
     const { data, error } = await supabase.rpc('add_upcoming_fight', {
         p_red_text: red,
         p_white_text: white
-    });
+    } as any);
     if (error) {
         console.error("Error adding upcoming fight:", error);
+        showNotification(`Error: ${error.message}`, 'error');
         return `Error: ${error.message}`;
     }
     // FIX: Add explicit type cast to resolve 'never' type inference issue.
@@ -350,18 +365,21 @@ const App: React.FC = () => {
   };
   const handleCloseBetting = () => {
     if (!supabase || !activeFight) return;
-    supabase.rpc('close_betting', { p_fight_id: activeFight.id });
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    supabase.rpc('close_betting', { p_fight_id: activeFight.id } as any);
   };
   const handleDeclareWinner = (winner: FightWinner) => {
     if (!supabase || !activeFight) return;
-    supabase.rpc('declare_winner', { p_fight_id: activeFight.id, p_winner_text: winner });
+    // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+    supabase.rpc('declare_winner', { p_fight_id: activeFight.id, p_winner_text: winner } as any);
   };
 
   const handleStartChat = async (user: AllUserTypes) => {
       if (!supabase) return;
       setMessages([]); // Clear previous messages
       setChatTargetUser(user);
-      const { data } = await supabase.rpc('get_messages', { p_contact_id: user.id });
+      // FIX: Cast arguments to `any` to bypass TypeScript inference error where parameter is expected to be `never`.
+      const { data } = await supabase.rpc('get_messages', { p_contact_id: user.id } as any);
       if (data) setMessages(data as Message[]);
   };
 
@@ -374,9 +392,9 @@ const App: React.FC = () => {
       case UserRole.OPERATOR:
         return <OperatorView currentUser={currentUser} fightStatus={activeFight?.status as FightStatus || FightStatus.SETTLED} lastWinner={lastWinner} fightId={activeFight?.id || null} timer={timer} bettingPools={bettingPools} liveBets={liveBets} upcomingFights={upcomingFights} completedFights={completedFights} allUsers={allUsers} onDeclareWinner={handleDeclareWinner} onAddUpcomingFight={handleAddUpcomingFight} onStartNextFight={handleStartNextFight} onCloseBetting={handleCloseBetting} />;
       case UserRole.AGENT:
-        return <AgentView currentUser={currentUser} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} masterAgents={masterAgents} onRespondToRequest={handleRespondToRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={handleStartChat} liveBets={liveBets} fightId={activeFight?.id || null} />;
+        return <AgentView currentUser={currentUser} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests.filter(req => req.toUserId === currentUser.id)} masterAgents={masterAgents} onRespondToRequest={handleRespondToRequest} onRequestCoins={handleCreateCoinRequest} onStartChat={handleStartChat} liveBets={liveBets} fightId={activeFight?.id || null} />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={handleStartChat} liveBets={liveBets} fightId={activeFight?.id || null} />;
+          return <MasterAgentView currentUser={currentUser} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests.filter(req => req.toUserId === currentUser.id)} onRespondToRequest={handleRespondToRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={handleStartChat} liveBets={liveBets} fightId={activeFight?.id || null} />;
       default:
         return <div>Invalid user role.</div>;
     }
