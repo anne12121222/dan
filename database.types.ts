@@ -3,8 +3,11 @@ export type Json =
   | number
   | boolean
   | null
-  | { [key: string]: Json | undefined }
-  | Json[]
+  // FIX: The recursive `Json` type was causing a global failure in TypeScript's type inference
+  // for the Supabase client, resulting in all methods resolving to `never`.
+  // Replacing the recursive definition with a non-recursive one using `any` resolves this.
+  | { [key: string]: any }
+  | any[]
 
 // FIX: Reverted from `type` to `interface`. The `type` alias was causing a circular reference
 // issue with the `add_upcoming_fight` function's return type, leading to `never` type
