@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient.ts';
@@ -423,6 +424,28 @@ const App: React.FC = () => {
     setNotification({ message: 'Agent created successfully!', type: 'success' });
     return null;
   };
+
+    const handleCreateMasterAgent = async (name: string, email: string, password: string): Promise<string | null> => {
+        if (!supabase) return "Supabase not configured";
+        setLoading(true);
+        const { data, error } = await (supabase.rpc as any)('create_master_agent_user', { p_name: name, p_email: email, p_password: password });
+        setLoading(false);
+        if (error) { return error.message; }
+        if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
+        setNotification({ message: 'Master Agent created successfully!', type: 'success' });
+        return null;
+    };
+    
+    const handleCreateOperator = async (name: string, email: string, password: string): Promise<string | null> => {
+        if (!supabase) return "Supabase not configured";
+        setLoading(true);
+        const { data, error } = await (supabase.rpc as any)('create_operator_user', { p_name: name, p_email: email, p_password: password });
+        setLoading(false);
+        if (error) { return error.message; }
+        if (typeof data === 'string' && data.toLowerCase().startsWith('error:')) { return data; }
+        setNotification({ message: 'Operator created successfully!', type: 'success' });
+        return null;
+    };
   
   const handleAddUpcomingFight = async (red: string, white: string): Promise<string | null> => {
     if (!supabase) return "Supabase not configured";
@@ -558,7 +581,7 @@ const App: React.FC = () => {
       case UserRole.AGENT:
           return <AgentView currentUser={currentUser as Agent} myPlayers={myPlayers} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onRequestCoins={handleAgentRequestCoins} onStartChat={setChatTargetUser} />;
       case UserRole.MASTER_AGENT:
-          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onStartChat={setChatTargetUser} />;
+          return <MasterAgentView currentUser={currentUser as MasterAgent} myAgents={myAgents} allUsers={allUsers} transactions={transactions} coinRequests={coinRequests} onRespondToRequest={handleRespondToCoinRequest} onCreateAgent={handleCreateAgent} onCreateMasterAgent={handleCreateMasterAgent} onCreateOperator={handleCreateOperator} onStartChat={setChatTargetUser} />;
       default:
         return <div className="p-8 text-center text-red-500">Error: Unknown user role.</div>;
     }

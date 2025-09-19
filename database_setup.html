@@ -7,7 +7,7 @@ drop trigger if exists on_auth_user_created on auth.users;
 drop function if exists public.handle_new_user();
 drop function if exists public.create_agent_user(text, text, text);
 drop function if exists public.create_operator_user(text, text, text);
-drop function if exists public.create_master_agent_user(text, text, text); -- Legacy
+drop function if exists public.create_master_agent_user(text, text, text);
 drop function if exists public.get_registerable_agents();
 drop function if exists public.get_all_users_for_operator();
 drop function if exists public.respond_to_coin_request(uuid, public.request_status_enum);
@@ -263,6 +263,48 @@ exception
 end;
 $$;
 comment on function public.create_agent_user(text, text, text) is 'Allows a Master Agent to create a new Agent user.';
+
+create or replace function public.create_master_agent_user(p_name text, p_email text, p_password text)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  new_user_id uuid;
+begin
+  -- For simplicity, we'll allow any existing Master Agent to create another.
+  -- In a real system, you might have a "super" role or another check.
+  if not exists (select 1 from public.profiles where id = auth.uid() and role = 'MASTER_AGENT'::public.user_role) then
+    return 'Error: Only Master Agents can create new Master Agents.';
+  end if;
+
+  select auth.admin.create_user(
+    p_email,
+    p_password,
+    jsonb_build_object('name', p_name)
+  )->'id' into new_user_id;
+
+  if new_user_id is null then
+      return 'Error: Could not create user in authentication system.';
+  end if;
+  
+  -- Update the auto-created PLAYER profile to MASTER_AGENT
+  update public.profiles
+  set 
+    role = 'MASTER_AGENT'::public.user_role,
+    master_agent_id = null, -- Master agents don't have a master agent
+    agent_id = null
+  where id = new_user_id;
+
+  return 'Success: Master Agent created.';
+exception
+  when others then
+    return 'Error: Could not create master agent. ' || SQLERRM;
+end;
+$$;
+comment on function public.create_master_agent_user(text, text, text) is 'Allows a Master Agent to create a new Master Agent user.';
+
 
 create or replace function public.create_operator_user(p_name text, p_email text, p_password text)
 returns text
